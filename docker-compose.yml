@@ -3,35 +3,60 @@
 version: "3.4"
 
 services:
+  nginx:
+    container_name: course-nginx
+    build:
+      context: ./prod-support/nginx
+      dockerfile: ./Dockerfile
+    ports:
+      - "3000:80"
+    networks:
+      - course
+      - nginx
+    depends_on:
+      - course-frontend
+      - course-backend
+      - course-distribute-server
+    links:
+      - course-frontend
+      - course-backend
   course-frontend:
+    container_name: course-frontend
     build:
       context: .
       dockerfile: ./prod-support/frontend/Dockerfile
+    # ports:
+    #   - "3000:3000"
     expose:
       - "3000"
     networks:
-      - course-frontend
+      - course
     environment:
       - REACT_APP_API_HOST=course-backend
     links:
-      - "course-backend"
+      - course-backend
   course-backend:
+    container_name: course-backend
     build:
       context: .
       dockerfile: ./prod-support/backend/Dockerfile
     expose:
       - "8000"
     networks:
-      - course-backend
+      - course
+    depends_on:
+      - course-mongodb
+      - course-redisdb
     environment:
       - DISTRIBUTE_SERVER_HOST=course-distribute-server
       - DISTRIBUTE_SERVER_PORT=8001
       - MONGO_HOST=course-mongodb
       - REDIS_HOST=course-redisdb
     links:
-      - "course-distribute-server"
+      - course-distribute-server
 
   course-mongodb:
+    container_name: course-mongo
     image: mongo
     environment:
       - MONGO_INITDB_ROOT_USERNAME=eeinfo
@@ -39,37 +64,27 @@ services:
     expose:
       - "27017"
     networks:
-      - course-mongodb
+      - course
 
   course-redisdb:
+    container_name: course-redis
     image: redis
     expose:
       - "6379"
     networks:
-      - course-redisdb
+      - course
 
   course-distribute-server:
+    container_name: course-distribute
     build:
       context: .
       dockerfile: ./prod-support/distribute-server/Dockerfile
     expose:
       - "8001"
     networks:
-      - course-distribute-server
+      - course
 
 networks:
-  course-frontend:
-    external:
-      name: eeinfo 
-  course-backend:
-    external:
-      name: eeinfo
-  course-distribute-server:
-    external:
-      name: eeinfo
-  course-mongodb:
-    external:
-      name: eeinfo
-  course-redisdb:
-    external:
-      name: eeinfo
+  nginx:
+    external: true
+  course:
