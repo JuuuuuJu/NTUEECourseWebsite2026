@@ -65,6 +65,8 @@ services:
       - "27017"
     networks:
       - course
+    volumes:
+      - course-mongo-data:/data/db
 
   course-redisdb:
     container_name: course-redis
@@ -88,3 +90,6 @@ networks:
   nginx:
     external: true
   course:
+
+volumes:
+  course-mongo-data:
