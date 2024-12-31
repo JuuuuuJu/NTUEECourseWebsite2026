@@ -28,7 +28,7 @@ db.createUser(
     }
 )
 
-db.grantRolesToUser("eeinfo", "dbOwner")
+db.grantRolesToUser("eeinfo", ["dbOwner"])
 ```
 
 Quit from the mongo container, then enter the `course-backend` container
@@ -42,5 +42,5 @@ npm run database reset
 ```
 And set the admin password
 ```bash
-npm run database admin -- -p admin
+npm run database admin -- -p ${ADMIN_PASSWORD}
 ```
