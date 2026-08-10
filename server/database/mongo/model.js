@@ -159,6 +159,40 @@ const SelectionCheckpoint = conn.model(
 
 // ========================================
 
+const digitalLabGroupSchema = new mongoose.Schema(
+  {
+    courseID: { type: String, required: true, immutable: true },
+    code: { type: String, required: true, uppercase: true, trim: true },
+    leaderUserID: { type: String, required: true },
+    memberUserIDs: {
+      type: [String],
+      required: true,
+      validate: {
+        validator: (members) => members.length > 0 && members.length <= 3,
+        message: "A Digital Lab group must contain one to three members.",
+      },
+    },
+    status: {
+      type: String,
+      enum: ["forming", "registered", "selected", "rejected"],
+      default: "forming",
+      required: true,
+    },
+  },
+  { timestamps: true }
+);
+
+digitalLabGroupSchema.index({ courseID: 1, code: 1 }, { unique: true });
+// MongoDB unique multikey index: a student can occur in only one group per course.
+digitalLabGroupSchema.index(
+  { courseID: 1, memberUserIDs: 1 },
+  { unique: true }
+);
+
+const DigitalLabGroup = conn.model("DigitalLabGroup", digitalLabGroupSchema);
+
+// ========================================
+
 // 只有數電實驗需要
 const preselectSchema = new mongoose.Schema({
   userID: {
@@ -233,6 +267,7 @@ module.exports = {
   Student,
   Selection,
   SelectionCheckpoint,
+  DigitalLabGroup,
   Preselect,
   OpenTime,
   Result,
@@ -242,6 +277,7 @@ module.exports = {
   userSchema,
   selectionSchema,
   selectionCheckpointSchema,
+  digitalLabGroupSchema,
   preselectSchema,
   openTimeSchema,
   resultSchema,

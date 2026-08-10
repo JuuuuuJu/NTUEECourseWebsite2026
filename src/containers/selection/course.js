@@ -10,7 +10,7 @@ const useStyles = makeStyles({
   styledCourse: {
     // backgroundImage: "linear-gradient(45deg, #FE6B8B 30%, #FF8E53 90%)", // #eee
     opacity: 1.0,
-    border: '2px solid rgba(178, 235, 242, 0.5)',
+    border: "2px solid rgba(178, 235, 242, 0.5)",
     borderRadius: 3, // 4
     padding: "15px 5px", // 4px, 8px
     //transition: "background-color .8s ease-out",
@@ -31,7 +31,7 @@ const useStyles = makeStyles({
   },
 });
 const Course = (props) => {
-  const { course, index } = props;
+  const { course, index, rankOffset } = props;
   const classes = useStyles();
   // let hover = false;
   return (
@@ -44,7 +44,7 @@ const Course = (props) => {
           {...provided.dragHandleProps}
         >
           <ListItem className={classes.styledCourse} button>
-            <ListItemText primary={`${index + 1}. ${course}`}/>
+            <ListItemText primary={`${index + 1 + rankOffset}. ${course}`} />
           </ListItem>
           {/* {index + 1}
           {course} */}
@@ -57,6 +57,9 @@ const Course = (props) => {
 Course.propTypes = {
   course: PropTypes.string.isRequired,
   index: PropTypes.number.isRequired,
+  rankOffset: PropTypes.number,
 };
+
+Course.defaultProps = { rankOffset: 0 };
 
 export default Course;

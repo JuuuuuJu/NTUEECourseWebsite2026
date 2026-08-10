@@ -37,9 +37,11 @@ export const CourseAPI = {
   putCourse: (course) =>
     axios.put(`/api/course`, [course]).catch((error) => errorHandling(error)),
   exportCourses: () =>
-    axios.get('/api/exportCourses.json').catch((error) => errorHandling(error)),
-  importCourses: (courses)=>
-    axios.post(`/api/importCourses`, courses).catch((error) => errorHandling(error)),
+    axios.get("/api/exportCourses.json").catch((error) => errorHandling(error)),
+  importCourses: (courses) =>
+    axios
+      .post(`/api/importCourses`, courses)
+      .catch((error) => errorHandling(error)),
 };
 
 export const StudentDataAPI = {
@@ -82,6 +84,14 @@ export const SelectAPI = {
     axios.delete(`/api/selection_checkpoint/${courseID}`),
 };
 
+export const DigitalLabAPI = {
+  getGroup: (courseID) => axios.get(`/api/digital-lab-group/${courseID}`),
+  createGroup: (courseID) => axios.post(`/api/digital-lab-group/${courseID}`),
+  joinGroup: (courseID, code) =>
+    axios.post(`/api/digital-lab-group/${courseID}/join`, { code }),
+  leaveGroup: (courseID) => axios.delete(`/api/digital-lab-group/${courseID}`),
+};
+
 export const DistributeAPI = {
   // postDistribute: () => axios.post(`/api/distribute`),
   postDistribute: () => axios.post(`/api/new_distribute`),
@@ -89,7 +99,7 @@ export const DistributeAPI = {
     axios.put(`/api/preselect`, ids).catch((error) => errorHandling(error)),
   getResult: () => axios.get(`/api/result.csv`),
   getStatistics: () => axios.get(`/api/statistics.csv`),
-  resetSelection: () => axios.delete('/api/reset_selection'),
+  resetSelection: () => axios.delete("/api/reset_selection"),
 };
 
 export const OpentimeAPI = {

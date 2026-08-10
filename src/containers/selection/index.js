@@ -16,13 +16,16 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  Divider,
+  Paper,
   Snackbar,
+  TextField,
 } from "@material-ui/core";
 import MuiAlert from "@material-ui/lab/Alert";
 // import initialData from "./initial-data";
 import MDEditor from "@uiw/react-md-editor";
 import Column from "./column";
-import { SelectAPI } from "../../api";
+import { DigitalLabAPI, SelectAPI } from "../../api";
 import Loading from "../../components/loading";
 
 // MdEditor
@@ -61,6 +64,20 @@ const useStyles = makeStyles((theme) => ({
       width: "95%",
     },
   },
+  digitalLab: {
+    width: "80%",
+    margin: theme.spacing(2, "auto"),
+    padding: theme.spacing(2),
+    [theme.breakpoints.down("sm")]: { width: "95%" },
+  },
+  groupActions: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: theme.spacing(1),
+    marginTop: theme.spacing(2),
+  },
+  groupCode: { maxWidth: 240 },
 }));
 const Selection = () => {
   // const selected = courseName.selected;
@@ -77,8 +94,11 @@ const Selection = () => {
     message: "",
   });
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+  const [digitalLabGroup, setDigitalLabGroup] = useState(null);
+  const [joinCode, setJoinCode] = useState("");
   const [busy, setBusy] = useState(false);
   const classes = useStyles();
+  const courseType = data ? data.type : null;
   useEffect(() => {
     const loadSelections = async () => {
       try {
@@ -91,6 +111,15 @@ const Selection = () => {
     };
     loadSelections();
   }, [courseId]);
+  useEffect(() => {
+    if (courseType !== "Ten-Select-Two") return;
+    DigitalLabAPI.getGroup(courseId)
+      .then((res) => setDigitalLabGroup(res.data.group))
+      .catch((err) => {
+        console.error(err);
+        showAlert("error", "無法載入數電實驗組隊資料。");
+      });
+  }, [courseId, courseType]);
   function Alert(props) {
     return <MuiAlert elevation={6} variant="filled" {...props} />;
   }
@@ -146,7 +175,17 @@ const Selection = () => {
     setBusy(true);
     try {
       const res = await SelectAPI.getSelectionCheckpoint(courseId);
-      setData((state) => ({ ...state, ...res.data.selections }));
+      setData((state) => {
+        const selections = res.data.selections;
+        if (state.type !== "Ten-Select-Two") return { ...state, ...selections };
+        return {
+          ...state,
+          selected: selections.selected.filter((name) => name !== "數電實驗"),
+          unselected: selections.unselected.filter(
+            (name) => name !== "數電實驗"
+          ),
+        };
+      });
       showAlert("success", "已恢復還原點；請按「儲存選課」才會正式提交。");
     } catch (err) {
       console.error(err);
@@ -159,6 +198,38 @@ const Selection = () => {
       setBusy(false);
     }
   }
+
+  async function updateDigitalLabGroup(action, successMessage) {
+    setBusy(true);
+    try {
+      const res = await action();
+      setDigitalLabGroup(res && res.data ? res.data.group : null);
+      setJoinCode("");
+      showAlert("success", successMessage);
+    } catch (err) {
+      console.error(err);
+      showAlert(
+        "error",
+        err.response?.data?.error || "數電實驗組隊操作失敗，請稍後再試。"
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const leaveDigitalLabGroup = async () => {
+    setBusy(true);
+    try {
+      await DigitalLabAPI.leaveGroup(courseId);
+      setDigitalLabGroup(null);
+      showAlert("success", "已退出數電實驗小組。");
+    } catch (err) {
+      console.error(err);
+      showAlert("error", err.response?.data?.error || "無法退出小組。");
+    } finally {
+      setBusy(false);
+    }
+  };
   // const { name, type, description, selected, unselected } = data;
   // return (
   //   <>
@@ -278,6 +349,103 @@ const Selection = () => {
       </Snackbar>
       {data ? (
         <>
+          {data.type === "Ten-Select-Two" && (
+            <Paper className={classes.digitalLab}>
+              <Typography variant="h6">數電實驗三人組隊</Typography>
+              <Typography color="textSecondary">
+                每組必須恰好三人。完整小組會登記參加獨立抽籤；數電實驗固定為第一志願，不能拖曳排序。
+              </Typography>
+              {digitalLabGroup ? (
+                <>
+                  <Typography>組隊代碼：{digitalLabGroup.code}</Typography>
+                  <Typography>
+                    狀態：
+                    {digitalLabGroup.status === "forming" &&
+                      "尚缺組員（不可登記）"}
+                    {digitalLabGroup.status === "registered" &&
+                      "三人完整，已登記抽籤"}
+                    {digitalLabGroup.status === "selected" && "已抽中數電實驗"}
+                    {digitalLabGroup.status === "rejected" && "未抽中數電實驗"}
+                  </Typography>
+                  <Divider />
+                  {digitalLabGroup.members.map((member) => (
+                    <Typography key={member.userID}>
+                      {member.userID}　{member.name}（{member.grade} 年級）
+                      {member.userID === digitalLabGroup.leaderUserID
+                        ? " — 組長"
+                        : ""}
+                    </Typography>
+                  ))}
+                  {["forming", "registered"].includes(
+                    digitalLabGroup.status
+                  ) && (
+                    <div className={classes.groupActions}>
+                      <Button
+                        variant="outlined"
+                        disabled={busy}
+                        onClick={() =>
+                          updateDigitalLabGroup(
+                            () => DigitalLabAPI.getGroup(courseId),
+                            "小組狀態已更新。"
+                          )
+                        }
+                      >
+                        更新小組狀態
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        color="secondary"
+                        disabled={busy}
+                        onClick={leaveDigitalLabGroup}
+                      >
+                        退出小組
+                      </Button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className={classes.groupActions}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    disabled={busy}
+                    onClick={() =>
+                      updateDigitalLabGroup(
+                        () => DigitalLabAPI.createGroup(courseId),
+                        "已建立小組，請將組隊代碼交給另外兩位同學。"
+                      )
+                    }
+                  >
+                    建立小組
+                  </Button>
+                  <TextField
+                    className={classes.groupCode}
+                    variant="outlined"
+                    size="small"
+                    label="輸入 8 碼組隊代碼"
+                    value={joinCode}
+                    onChange={(event) =>
+                      setJoinCode(event.target.value.toUpperCase())
+                    }
+                    inputProps={{ maxLength: 8 }}
+                  />
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    disabled={busy || joinCode.length !== 8}
+                    onClick={() =>
+                      updateDigitalLabGroup(
+                        () => DigitalLabAPI.joinGroup(courseId, joinCode),
+                        "已加入數電實驗小組。"
+                      )
+                    }
+                  >
+                    加入小組
+                  </Button>
+                </div>
+              )}
+            </Paper>
+          )}
           <div className={classes.actions}>
             <Button
               variant="contained"
@@ -309,6 +477,12 @@ const Selection = () => {
                 title="已選課程"
                 droppableId="selected"
                 column={data.selected}
+                fixedCourse={
+                  digitalLabGroup &&
+                  ["registered", "selected"].includes(digitalLabGroup.status)
+                    ? "數電實驗"
+                    : ""
+                }
               />
               <Column
                 title="未選課程"

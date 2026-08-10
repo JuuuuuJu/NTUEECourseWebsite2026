@@ -499,7 +499,7 @@ class Course:
     def __repr__(self):
         return self.__str__()
 
-    def distribute(self, students):
+    def distribute(self, students, preselected_student_ids=None):
         ''' Distribute this course and store result in self._distribute_result.
 
         Args:
@@ -510,6 +510,8 @@ class Course:
             A dictionary contains the result of distribution.
         '''
 
+        preselected_student_ids = set(preselected_student_ids or [])
+
         # generate students list who are going to be distributed in this course
         for student in students:
             
@@ -518,7 +520,9 @@ class Course:
                 continue
 
             # initial select_num
-            self._has_selected_num_list[student._id] = 0
+            self._has_selected_num_list[student._id] = (
+                1 if student._id in preselected_student_ids else 0
+            )
 
             # check if this student has select any option of this course
             if self._id in student._options:
@@ -657,7 +661,7 @@ class Student:
 
 class Algorithm:
     @staticmethod
-    def distribute(courses, students):
+    def distribute(courses, students, preselected_by_course=None):
         ''' Run distribution of all courses
 
         Args:
@@ -674,12 +678,13 @@ class Algorithm:
         '''
 
         results = list()
+        preselected_by_course = preselected_by_course or {}
 
         # iterate through all courses
         for course in courses:
 
             # distribute
-            course.distribute(students)
+            course.distribute(students, preselected_by_course.get(course._id, []))
 
             # manage data type and store data
             for option in course._distribute_result.keys():

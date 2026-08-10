@@ -16,6 +16,7 @@ const { string } = require("yargs");
 const constants = require("./constants");
 const model = require("./database/mongo/model");
 const mailRouter = require("./mail/routes");
+const digitalLabRouter = require("./digitalLab/routes");
 
 // ========================================
 
@@ -117,6 +118,7 @@ if (process.env.NODE_ENV === "production") {
 router.use(session(sessionOptions));
 
 router.use(mailRouter);
+router.use(digitalLabRouter);
 
 // ========================================
 
@@ -484,11 +486,15 @@ router
       selected = selected.map((selection) => selection.name);
       const unselected = options
         .filter(
-	  (option) => 
-	    !selected.includes(option.name) &&
-	    option.priority_type !== "preselect"
-	)
+          (option) =>
+            !selected.includes(option.name) &&
+            option.priority_type !== "preselect" &&
+            !(type === "Ten-Select-Two" && option.name === "數電實驗")
+        )
         .map((selection) => selection.name);
+      selected = selected.filter(
+        (option) => !(type === "Ten-Select-Two" && option === "數電實驗")
+      );
       res.send({ name, type, description, selected, unselected, number });
     })
   )
@@ -497,8 +503,13 @@ router
     asyncHandler(async (req, res, next) => {
       const { userID } = req.session;
       const { courseID } = req.params;
-      const { options } = req.course;
-      const optionNames = options.map((option) => option.name);
+      const { options, type } = req.course;
+      const optionNames = options
+        .filter(
+          (option) =>
+            !(type === "Ten-Select-Two" && option.name === "數電實驗")
+        )
+        .map((option) => option.name);
 
       // Validation
       if (!Array.isArray(req.body)) {
@@ -579,7 +590,10 @@ router
       }
 
       const selectableOptions = req.course.options
-        .filter((option) => option.priority_type !== "preselect")
+        .filter(
+          (option) =>
+            option.priority_type !== "preselect" && option.name !== "數電實驗"
+        )
         .map((option) => option.name);
       const selections = [...selected, ...unselected];
       const uniqueSelections = new Set(selections);
@@ -636,6 +650,10 @@ router.route("/result").get(
       courseID: 1,
       ranking: 1,
     });
+    const digitalLabResult = await model.Result.findOne({
+      studentID: userID,
+      optionName: "數電實驗",
+    });
     const courses = await model.Course.find({}, "id name");
     const coursesId2Name = {};
     await Promise.all(
@@ -643,6 +661,19 @@ router.route("/result").get(
         coursesId2Name[course.id] = course.name;
       })
     );
+
+    if (digitalLabResult) {
+      const course = courses.find(
+        (item) => item.name === digitalLabResult.courseName
+      );
+      results.unshift({
+        _id: digitalLabResult._id,
+        courseID: course ? course.id : "Ten-Select-Two",
+        userID,
+        name: digitalLabResult.optionName,
+        ranking: "獨立抽籤錄取（固定第一志願）",
+      });
+    }
 
     res.send({ results, coursesId2Name });
   })
@@ -1029,6 +1060,7 @@ router.delete(
     await model.Selection.deleteMany();
     await model.Preselect.deleteMany();
     await model.Result.deleteMany();
+    await model.DigitalLabGroup.deleteMany();
     res.status(204).end();
   })
 );

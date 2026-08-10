@@ -4,6 +4,7 @@ from flask import Flask, request, Response
 
 from algorithm import Algorithm, Course, Student
 from statistics import Analysis
+from digital_lab import DIGITAL_LAB_OPTION, select_digital_lab_groups
 # ========================================
 
 app = Flask(__name__)
@@ -32,6 +33,8 @@ def genCourse(raw_courses):
         courseDict["students"] = data["students"]
         courseDict["options"] = {}
         for op in data["options"]:
+            if data["type"] == "Ten-Select-Two" and op["name"] == DIGITAL_LAB_OPTION:
+                continue
             option = {
                 "limit": op["limit"],
             }
@@ -172,6 +175,7 @@ def new_distribute():
     raw_selections = db["selections"]
     raw_students = db["students"]
     raw_courses = db["courses"]
+    raw_digital_lab_groups = db["digitallabgroups"]
 
     db.results.delete_many({})
 
@@ -185,8 +189,54 @@ def new_distribute():
     students = genStudent(raw_students, raw_selections, course_names)
 
 
-    results = Algorithm.distribute(courses, students)
-    db.results.insert_many(results)
+    student_grades = {
+        student["userID"]: student["grade"] for student in raw_students.find()
+    }
+    ten_select_two = raw_courses.find_one({"type": "Ten-Select-Two"})
+    group_query = {
+        "status": {"$in": ["registered", "selected", "rejected"]}
+    }
+    if ten_select_two:
+        group_query["courseID"] = ten_select_two["id"]
+    else:
+        group_query["courseID"] = {"$exists": False}
+    groups = list(raw_digital_lab_groups.find(group_query))
+    selected_groups = select_digital_lab_groups(groups, student_grades)
+    selected_group_ids = [group["_id"] for group in selected_groups]
+    raw_digital_lab_groups.update_many(
+        {"_id": {"$in": selected_group_ids}}, {"$set": {"status": "selected"}}
+    )
+    raw_digital_lab_groups.update_many(
+        {
+            "courseID": ten_select_two["id"] if ten_select_two else None,
+            "status": {"$in": ["registered", "selected", "rejected"]},
+            "_id": {"$nin": selected_group_ids},
+        },
+        {"$set": {"status": "rejected"}},
+    )
+
+    digital_winners = [
+        member for group in selected_groups for member in group["memberUserIDs"]
+    ]
+    preselected_by_course = {}
+    digital_results = []
+    if ten_select_two:
+        preselected_by_course[ten_select_two["id"]] = digital_winners
+        digital_results = [
+            {
+                "studentID": student_id,
+                "courseName": ten_select_two["name"],
+                "courseID": ten_select_two["id"],
+                "optionName": DIGITAL_LAB_OPTION,
+            }
+            for student_id in digital_winners
+        ]
+
+    results = digital_results + Algorithm.distribute(
+        courses, students, preselected_by_course
+    )
+    if results:
+        db.results.insert_many(results)
 
     client.close()
     return ""

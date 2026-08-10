@@ -1,5 +1,5 @@
 import React from "react";
-import { List, Typography } from "@material-ui/core";
+import { List, ListItem, ListItemText, Typography } from "@material-ui/core";
 import { Droppable } from "react-beautiful-dnd";
 import PropTypes from "prop-types";
 import { makeStyles } from "@material-ui/core/styles";
@@ -28,9 +28,15 @@ const useStyles = makeStyles({
     border: 4,
     borderColor: "pink",
   },
+  fixedCourse: {
+    border: "2px solid rgba(255, 193, 7, 0.7)",
+    borderRadius: 3,
+    marginTop: 8,
+    color: "white",
+  },
 });
 const Column = (props) => {
-  const { title, column, droppableId } = props;
+  const { title, column, droppableId, fixedCourse } = props;
   const classes = useStyles();
   return (
     <Droppable droppableId={droppableId}>
@@ -42,9 +48,22 @@ const Column = (props) => {
             {...provided.droppableProps}
             ref={provided.innerRef}
           >
+            {fixedCourse && (
+              <ListItem className={classes.fixedCourse}>
+                <ListItemText
+                  primary={`1. ${fixedCourse}`}
+                  secondary="三人小組已完成；此志願固定且另行抽籤"
+                />
+              </ListItem>
+            )}
             {column
               ? column.map((element, index) => (
-                  <Course key={element} course={element} index={index} />
+                  <Course
+                    key={element}
+                    course={element}
+                    index={index}
+                    rankOffset={fixedCourse ? 1 : 0}
+                  />
                 ))
               : null}
             {provided.placeholder}
@@ -59,6 +78,9 @@ Column.propTypes = {
   column: PropTypes.arrayOf(PropTypes.string).isRequired,
   title: PropTypes.string.isRequired,
   droppableId: PropTypes.string.isRequired,
+  fixedCourse: PropTypes.string,
 };
+
+Column.defaultProps = { fixedCourse: "" };
 
 export default Column;
