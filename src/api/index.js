@@ -111,3 +111,13 @@ export const SampleAPI = {
       .get("/api/sample", { params: { userID } })
       .catch((error) => errorHandling(error)),
 };
+
+export const EmailAPI = {
+  getTemplates: () => axios.get("/api/email-templates"),
+  getTemplate: (key) => axios.get(`/api/email-templates/${key}`),
+  putTemplate: (key, template) =>
+    axios.put(`/api/email-templates/${key}`, template),
+  previewTemplate: (key, data) =>
+    axios.post(`/api/email-templates/${key}/preview`, data),
+  sendEmail: (data) => axios.post("/api/email-send", data),
+};

@@ -29,6 +29,7 @@ import Search from "@material-ui/icons/Search";
 import PeopleIcon from "@material-ui/icons/People"; // Student Data
 import CloudUploadIcon from "@material-ui/icons/CloudUpload"; // Course Manage
 import ShuffleIcon from "@material-ui/icons/Shuffle"; // Distribute
+import EmailIcon from "@material-ui/icons/Email";
 // slices, logout
 import { Redirect } from "react-router";
 import { selectSession, logout } from "../../slices/sessionSlice";
@@ -188,6 +189,11 @@ const Drawer = ({ children }) => {
             text: "Distribute",
             to: "/distribute",
             icon: <ShuffleIcon />,
+          },
+          {
+            text: "Email Management",
+            to: "/email-management",
+            icon: <EmailIcon />,
           },
           { text: "Sample", to: "/sample", icon: <Search /> },
         ],

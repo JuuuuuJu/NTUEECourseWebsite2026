@@ -36,6 +36,7 @@
     "node-cron": "^3.0.0",
     "node-fetch": "^2.6.1",
     "node-uuid": "^1.4.8",
+    "nodemailer": "6.9.16",
     "papaparse": "^5.3.1",
     "prop-types": "^15.7.2",
     "pure-react-carousel": "^1.27.5",

@@ -15,6 +15,7 @@ const { promisify } = require("util");
 const { string } = require("yargs");
 const constants = require("./constants");
 const model = require("./database/mongo/model");
+const mailRouter = require("./mail/routes");
 
 // ========================================
 
@@ -114,6 +115,8 @@ if (process.env.NODE_ENV === "production") {
 }
 
 router.use(session(sessionOptions));
+
+router.use(mailRouter);
 
 // ========================================
 

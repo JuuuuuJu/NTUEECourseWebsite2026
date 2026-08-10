@@ -8,6 +8,7 @@ const courses = require("../data/courses");
 
 // Students with raw passwords, must be hashed later
 const studentsRaw = require("../data/students.json");
+const { DEFAULT_TEMPLATES } = require("../../mail/templates");
 
 // ========================================
 
@@ -69,6 +70,9 @@ module.exports = () => {
       })
     );
     console.log("All students are saved.");
+
+    await model.EmailTemplate.insertMany(DEFAULT_TEMPLATES);
+    console.log("Default email templates are saved.");
 
     // Keep the local development selection period open after every reset.
     const now = Math.floor(Date.now() / 1000);

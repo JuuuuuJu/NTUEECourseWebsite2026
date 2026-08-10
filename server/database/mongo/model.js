@@ -211,6 +211,23 @@ const Result = conn.model("Result", resultSchema);
 
 // ========================================
 
+const emailTemplateSchema = new mongoose.Schema(
+  {
+    key: { type: String, required: true, unique: true, immutable: true },
+    category: { type: String, required: true, immutable: true },
+    purpose: { type: String, required: true, immutable: true },
+    subject: { type: String, required: true },
+    senderName: { type: String, required: true },
+    body: { type: String, required: true },
+    updatedBy: { type: String, required: true },
+  },
+  { timestamps: true }
+);
+
+const EmailTemplate = conn.model("EmailTemplate", emailTemplateSchema);
+
+// ========================================
+
 module.exports = {
   Course,
   Student,
@@ -219,6 +236,7 @@ module.exports = {
   Preselect,
   OpenTime,
   Result,
+  EmailTemplate,
   conn,
   courseSchema,
   userSchema,
@@ -227,4 +245,5 @@ module.exports = {
   preselectSchema,
   openTimeSchema,
   resultSchema,
+  emailTemplateSchema,
 };
