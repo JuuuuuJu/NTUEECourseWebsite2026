@@ -124,6 +124,41 @@ const Selection = conn.model("Selection", selectionSchema);
 
 // ========================================
 
+const selectionCheckpointSchema = new mongoose.Schema(
+  {
+    courseID: {
+      type: String,
+      required: true,
+      immutable: true,
+    },
+    userID: {
+      type: String,
+      required: true,
+      immutable: true,
+    },
+    selections: {
+      selected: {
+        type: [String],
+        required: true,
+      },
+      unselected: {
+        type: [String],
+        required: true,
+      },
+    },
+  },
+  { timestamps: true }
+);
+
+selectionCheckpointSchema.index({ userID: 1, courseID: 1 }, { unique: true });
+
+const SelectionCheckpoint = conn.model(
+  "SelectionCheckpoint",
+  selectionCheckpointSchema
+);
+
+// ========================================
+
 // 只有數電實驗需要
 const preselectSchema = new mongoose.Schema({
   userID: {
@@ -180,6 +215,7 @@ module.exports = {
   Course,
   Student,
   Selection,
+  SelectionCheckpoint,
   Preselect,
   OpenTime,
   Result,
@@ -187,6 +223,7 @@ module.exports = {
   courseSchema,
   userSchema,
   selectionSchema,
+  selectionCheckpointSchema,
   preselectSchema,
   openTimeSchema,
   resultSchema,

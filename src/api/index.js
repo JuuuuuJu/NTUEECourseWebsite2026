@@ -71,14 +71,15 @@ export const PasswordAPI = {
 };
 
 export const SelectAPI = {
-  getSelections: (courseID) =>
-    axios
-      .get(`/api/selections/${courseID}`)
-      .catch((error) => errorHandling(error)),
+  getSelections: (courseID) => axios.get(`/api/selections/${courseID}`),
   putSelections: (courseID, data) =>
-    axios
-      .put(`/api/selections/${courseID}`, [...data])
-      .catch((error) => errorHandling(error)), // , [...courseID.data.selected]),
+    axios.put(`/api/selections/${courseID}`, [...data]),
+  getSelectionCheckpoint: (courseID) =>
+    axios.get(`/api/selection_checkpoint/${courseID}`),
+  putSelectionCheckpoint: (courseID, data) =>
+    axios.put(`/api/selection_checkpoint/${courseID}`, data),
+  deleteSelectionCheckpoint: (courseID) =>
+    axios.delete(`/api/selection_checkpoint/${courseID}`),
 };
 
 export const DistributeAPI = {

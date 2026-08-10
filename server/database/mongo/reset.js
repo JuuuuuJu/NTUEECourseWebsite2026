@@ -70,10 +70,13 @@ module.exports = () => {
     );
     console.log("All students are saved.");
 
+    // Keep the local development selection period open after every reset.
+    const now = Math.floor(Date.now() / 1000);
+
     // Save Start Time
     const startTimeDocument = new model.OpenTime({
       type: "start",
-      time: Math.floor(new Date(2021, 0, 1, 0, 0) / 1000),
+      time: now - 24 * 60 * 60,
     });
     await startTimeDocument.save();
     console.log("Start time is saved.");
@@ -81,7 +84,7 @@ module.exports = () => {
     // Save End Time
     const endTimeDocument = new model.OpenTime({
       type: "end",
-      time: Math.floor(new Date(2026, 0, 1, 0, 0) / 1000),
+      time: now + 30 * 24 * 60 * 60,
     });
     await endTimeDocument.save();
     console.log("End time is saved.");

@@ -520,6 +520,109 @@ router
     })
   );
 
+router
+  .route("/selection_checkpoint/:courseID")
+  .all(
+    openTimeMiddleware,
+    loginRequired,
+    asyncHandler(async (req, res, next) => {
+      const { courseID } = req.params;
+      if (!courseID || typeof courseID !== "string") {
+        res.status(400).end();
+        return;
+      }
+
+      const course = await model.Course.findOne(
+        { id: courseID },
+        "options students"
+      );
+      if (!course) {
+        res.sendStatus(404);
+        return;
+      }
+      if (
+        course.students.length > 0 &&
+        !course.students.includes(req.session.userID)
+      ) {
+        res.sendStatus(403);
+        return;
+      }
+
+      req.course = course;
+      next();
+    })
+  )
+  .get(
+    asyncHandler(async (req, res, next) => {
+      const checkpoint = await model.SelectionCheckpoint.findOne({
+        userID: req.session.userID,
+        courseID: req.params.courseID,
+      }).select("selections updatedAt -_id");
+
+      if (!checkpoint) {
+        res.sendStatus(404);
+        return;
+      }
+      res.status(200).send(checkpoint);
+    })
+  )
+  .put(
+    express.json({ strict: true }),
+    asyncHandler(async (req, res, next) => {
+      const { selected, unselected } = req.body || {};
+      if (!Array.isArray(selected) || !Array.isArray(unselected)) {
+        res.status(400).end();
+        return;
+      }
+
+      const selectableOptions = req.course.options
+        .filter((option) => option.priority_type !== "preselect")
+        .map((option) => option.name);
+      const selections = [...selected, ...unselected];
+      const uniqueSelections = new Set(selections);
+      const valid =
+        selections.every((option) => typeof option === "string") &&
+        uniqueSelections.size === selections.length &&
+        selections.length === selectableOptions.length &&
+        selectableOptions.every((option) => uniqueSelections.has(option));
+
+      if (!valid) {
+        res.status(400).end();
+        return;
+      }
+
+      const checkpoint = await model.SelectionCheckpoint.findOneAndUpdate(
+        {
+          userID: req.session.userID,
+          courseID: req.params.courseID,
+        },
+        {
+          $set: { selections: { selected, unselected } },
+          $setOnInsert: {
+            userID: req.session.userID,
+            courseID: req.params.courseID,
+          },
+        },
+        {
+          new: true,
+          upsert: true,
+          runValidators: true,
+          setDefaultsOnInsert: true,
+        }
+      ).select("selections updatedAt -_id");
+      res.status(200).send(checkpoint);
+    })
+  )
+  .delete(
+    asyncHandler(async (req, res, next) => {
+      await model.SelectionCheckpoint.deleteOne({
+        userID: req.session.userID,
+        courseID: req.params.courseID,
+      });
+      res.status(204).end();
+    })
+  );
+
 router.route("/result").get(
   openTimeMiddleware,
   loginRequired,
@@ -991,7 +1094,7 @@ router.post(
         const { id, name, type, description, options, number } =
           data;
         const course = await model.Course.findOne({ id }).exec();
-        
+
         if (!course) {
           const courseDocument = new model.Course({
             id,
