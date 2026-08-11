@@ -92,6 +92,17 @@ export const DigitalLabAPI = {
   leaveGroup: (courseID) => axios.delete(`/api/digital-lab-group/${courseID}`),
 };
 
+export const BackupAPI = {
+  create: () => axios.post("/api/db-backups"),
+  list: () => axios.get("/api/db-backups"),
+  remove: (filename) =>
+    axios.delete(`/api/db-backups/${encodeURIComponent(filename)}`),
+  download: (filename) =>
+    axios.get(`/api/db-backups/${encodeURIComponent(filename)}/download`, {
+      responseType: "blob",
+    }),
+};
+
 export const DistributeAPI = {
   // postDistribute: () => axios.post(`/api/distribute`),
   postDistribute: () => axios.post(`/api/new_distribute`),

@@ -36,7 +36,7 @@ import { Add } from "@material-ui/icons";
 import example from "./preselectExample.png";
 
 // api
-import { DistributeAPI, CourseAPI, StudentDataAPI } from "../../api";
+import { BackupAPI, DistributeAPI, CourseAPI, StudentDataAPI } from "../../api";
 
 // upload csv
 import Papa from "papaparse";
@@ -123,6 +123,7 @@ export default function Distribute() {
   const [alert, setAlert] = useState({});
   const [resetSelectionOpened, setResetSelectionOpened] = useState(false);
   const [resetSelectionInput, setResetSelectionInput] = useState("");
+  const [lastBackup, setLastBackup] = useState(null);
 
   const handleGetDistribution = () => {
     DistributeAPI.getResult()
@@ -162,25 +163,53 @@ export default function Distribute() {
       );
   };
 
+  const refreshLastBackup = () =>
+    BackupAPI.list()
+      .then(({ data }) => setLastBackup(data[0] || null))
+      .catch(() => setLastBackup(null));
+
+  const handleCreateBackup = async () => {
+    setLoading(true);
+    try {
+      const { data } = await BackupAPI.create();
+      setLastBackup(data);
+      setAlert({ open: true, severity: "success", msg: `DB 備份完成：${data.filename}` });
+    } catch (error) {
+      setAlert({ open: true, severity: "error", msg: "DB 備份失敗，尚未執行分發。" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleRunDistribution = () => {
+    const recent = lastBackup && Date.now() - new Date(lastBackup.createdAt).getTime() < 30 * 60 * 1000;
+    const warning = recent
+      ? "RUN 會覆寫目前分發結果。系統仍會在執行前建立新的 DB 備份。確定繼續？"
+      : "目前沒有 30 分鐘內的備份。RUN 會覆寫分發結果；系統將先建立 DB 備份，若備份失敗則不會執行。確定繼續？";
+    if (!window.confirm(warning)) return;
     setLoading(true);
     DistributeAPI.postDistribute()
-      .then(() => {
+      .then(({ data }) => {
+        setLastBackup(data.backup);
         setAlert({
           open: true,
           severity: "success",
-          msg: "Course distribution operation succeeded. Distribution result is available.",
+          msg: `Course distribution succeeded. Pre-run backup: ${data.backup.filename}`,
         });
         setLastDistributeTime(Date().toLocaleString());
         handleNext();
       })
-      .catch(() =>
+      .catch((error) => {
+        const backup = error.response && error.response.data && error.response.data.backup;
+        if (backup) setLastBackup(backup);
         setAlert({
           open: true,
           severity: "error",
-          msg: "Course distribution operation failed.",
-        })
-      )
+          msg: backup
+            ? `Distribution failed, but backup was saved: ${backup.filename}`
+            : "Backup failed; distribution was not started.",
+        });
+      })
       .finally(() => setLoading(false));
   };
   const handleUploadCsv = async (efile) => {
@@ -371,6 +400,14 @@ export default function Distribute() {
   useEffect(() => {
     handleCoursesReload();
     handleStudentDataReload();
+    refreshLastBackup();
+    const refreshOnFocus = () => refreshLastBackup();
+    window.addEventListener("focus", refreshOnFocus);
+    window.addEventListener("db-backups-changed", refreshOnFocus);
+    return () => {
+      window.removeEventListener("focus", refreshOnFocus);
+      window.removeEventListener("db-backups-changed", refreshOnFocus);
+    };
   }, []);
   return (
     <div>
@@ -509,9 +546,13 @@ export default function Distribute() {
                 </Typography>
               </StepButton>
               <StepContent>
+                <Typography style={{ color: "#ffb74d", fontWeight: 700 }}>
+                  RUN 會覆寫先前結果。後端會先強制建立 DB 備份；備份失敗時不會開始分發。
+                </Typography>
                 <Typography>
-                  The previous distribution result will be OVERWRITTEN. Please
-                  make sure all student data and course data are correct.
+                  {lastBackup
+                    ? `最近備份：${new Date(lastBackup.createdAt).toLocaleString()} (${lastBackup.filename})`
+                    : "目前沒有可用的 DB 備份。"}
                 </Typography>
                 {/* <Typography style={{ color: "#d32f2f" }}>
                   If specifying certain students for certain course is needed,
@@ -556,6 +597,14 @@ export default function Distribute() {
                   <div className={classes.actionsContainer}>
                     <Button className={classes.button} onClick={handleBack}>
                       Back
+                    </Button>
+                    <Button
+                      className={classes.button}
+                      onClick={handleCreateBackup}
+                      variant="contained"
+                      style={{ backgroundColor: "#ed6c02", color: "white" }}
+                    >
+                      先備份 DB
                     </Button>
                     <Button
                       onClick={handleRunDistribution}

@@ -21,6 +21,7 @@ import CourseManage from "./containers/courseManage";
 import Distribute from "./containers/distribute";
 import Sample from "./containers/sample";
 import EmailManagement from "./containers/emailManagement";
+import Maintenance from "./containers/maintenance";
 import theme from "./theme";
 // compononets
 import Loading from "./components/loading";
@@ -66,6 +67,9 @@ const Routes = () => {
       </AdminRoute>
       <AdminRoute exact path="/email-management">
         <EmailManagement />
+      </AdminRoute>
+      <AdminRoute exact path="/maintenance">
+        <Maintenance />
       </AdminRoute>
       <Redirect to="/login" />
     </Switch>

@@ -52,8 +52,11 @@ services:
       - DISTRIBUTE_SERVER_PORT=8001
       - MONGO_HOST=course-mongodb
       - REDIS_HOST=course-redisdb
+      - BACKUP_DIR=/app/tmp/db-backups
     links:
       - course-distribute-server
+    volumes:
+      - course-db-backups:/app/tmp/db-backups
 
   course-mongodb:
     container_name: course-mongo
@@ -93,3 +96,4 @@ networks:
 
 volumes:
   course-mongo-data:
+  course-db-backups:
