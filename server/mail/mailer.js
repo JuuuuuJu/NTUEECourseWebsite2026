@@ -52,4 +52,24 @@ const sendRenderedEmail = ({
     html: rendered.html,
   });
 
-module.exports = { createTransport, getEnrollmentYear, sendRenderedEmail };
+const sendRenderedBccEmail = ({
+  transport,
+  smtpUserid,
+  senderName,
+  bcc,
+  rendered,
+}) =>
+  transport.sendMail({
+    from: {
+      name: senderName,
+      address: `${String(smtpUserid).replace(
+        /@ntu\.edu\.tw$/i,
+        ""
+      )}@ntu.edu.tw`,
+    },
+    bcc,
+    subject: rendered.subject,
+    html: rendered.html,
+  });
+
+module.exports = { createTransport, getEnrollmentYear, sendRenderedBccEmail, sendRenderedEmail };

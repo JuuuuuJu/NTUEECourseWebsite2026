@@ -272,7 +272,7 @@ const emailJobRecipientSchema = new mongoose.Schema(
     email: String,
     actualRecipient: String,
     values: { type: mongoose.Schema.Types.Mixed, required: true },
-    status: { type: String, enum: ["queued", "sending", "sent", "failed", "skipped"], required: true, default: "queued" },
+    status: { type: String, enum: ["queued", "sending", "sent", "failed", "skipped", "canceled"], required: true, default: "queued" },
     sentAt: Date,
     attempts: { type: Number, required: true, default: 0 },
     reportPassword: String,
@@ -291,6 +291,7 @@ const emailJobSchema = new mongoose.Schema(
     recipientSource: {
       mode: { type: String, enum: ["csv", "database"], required: true },
       grades: [Number],
+      reminderCourseIDs: [String],
       summary: { type: String, required: true },
       override: String,
     },

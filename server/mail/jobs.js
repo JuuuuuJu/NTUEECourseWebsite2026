@@ -1,14 +1,38 @@
 const model = require("../database/mongo/model");
-const { createTransport, sendRenderedEmail } = require("./mailer");
+const { createTransport, sendRenderedBccEmail, sendRenderedEmail } = require("./mailer");
 const { generatePassword, updateStudentPassword } = require("./passwords");
 const { renderTemplate } = require("./renderTemplate");
 const { decryptCredential } = require("./credentials");
+const { usesBccDelivery } = require("./templates");
 
 const HOURLY_LIMIT = Math.min(Number(process.env.EMAIL_HOURLY_LIMIT) || 200, 200);
 const BATCH_SIZE = Math.min(Number(process.env.EMAIL_BATCH_SIZE) || 20, HOURLY_LIMIT);
 const POLL_MS = Number(process.env.EMAIL_WORKER_POLL_MS) || 15000;
 let timer;
 let running = false;
+const cancellationRequests = new Set();
+
+const safeErrorSummary = (error) => {
+  const metadata = [error && error.code, error && error.command]
+    .filter(Boolean)
+    .join("/");
+  const message = String((error && error.message) || "Unknown error")
+    .replace(/[\r\n]+/g, " ")
+    .slice(0, 240);
+  return `${metadata ? `[${metadata}] ` : ""}${message}`;
+};
+
+const requestCancellation = async (job) => {
+  cancellationRequests.add(String(job._id));
+  job.recipients.forEach((recipient) => {
+    if (recipient.status === "queued") recipient.status = "canceled";
+  });
+  job.status = "canceled";
+  job.completedAt = new Date();
+  job.nextRunAt = undefined;
+  await job.save();
+  return job;
+};
 
 const publicRecipient = (recipient) => ({
   id: recipient._id,
@@ -36,6 +60,7 @@ const publicJob = (job, includeRecipients = true) => {
     sent: count("sent"),
     failed: count("failed"),
     skipped: count("skipped"),
+    canceled: count("canceled"),
     remaining: count("queued") + count("sending"),
     hourlyLimit: HOURLY_LIMIT,
     nextRunAt: job.nextRunAt,
@@ -119,8 +144,59 @@ const processJobs = async () => {
       job.status = "sending";
       job.nextRunAt = undefined;
       await job.save();
+      if (usesBccDelivery(job.templateKey)) {
+        const queued = job.recipients.filter((item) => item.status === "queued");
+        if (queued.length) {
+          let sharedContent;
+          try {
+            for (const recipient of queued) {
+              const rendered = renderTemplate(
+                { subject: job.subject, body: job.templateBody },
+                { ...job.variables, ...recipient.values }
+              );
+              if (!sharedContent) sharedContent = rendered;
+              else if (
+                rendered.subject !== sharedContent.subject ||
+                rendered.html !== sharedContent.html
+              ) {
+                throw new Error("BCC content differs between recipients.");
+              }
+              recipient.status = "sending";
+              recipient.attempts += 1;
+            }
+            await job.save();
+            await sendRenderedBccEmail({
+              transport,
+              smtpUserid: job.smtpUserid,
+              senderName: job.senderName,
+              bcc: [...new Set(queued.map((recipient) => recipient.actualRecipient))],
+              rendered: sharedContent,
+            });
+            const sentAt = new Date();
+            queued.forEach((recipient) => {
+              recipient.status = "sent";
+              recipient.sentAt = sentAt;
+              recipient.error = undefined;
+            });
+            available -= 1;
+          } catch (error) {
+            queued.forEach((recipient) => {
+              recipient.status = "failed";
+              recipient.error = error.message === "BCC content differs between recipients."
+                ? "BCC delivery requires identical subject and content for every recipient."
+                : `Email delivery failed: ${safeErrorSummary(error)}`;
+            });
+          }
+          await job.save();
+        }
+        await finishIfDone(job);
+        transport.close();
+        transport = undefined;
+        continue;
+      }
       const queued = job.recipients.filter((item) => item.status === "queued").slice(0, Math.min(BATCH_SIZE, available));
       for (const recipient of queued) {
+        if (cancellationRequests.has(String(job._id))) break;
         recipient.status = "sending";
         recipient.attempts += 1;
         await job.save();
@@ -155,12 +231,29 @@ const processJobs = async () => {
           available -= 1;
         } catch (error) {
           recipient.status = "failed";
-          recipient.error = "Email delivery or post-send password update failed.";
+          recipient.error = `Email delivery or post-send password update failed: ${safeErrorSummary(error)}`;
         }
         rawPassword = undefined;
+        if (cancellationRequests.has(String(job._id))) {
+          job.recipients.forEach((item) => {
+            if (item.status === "queued") item.status = "canceled";
+          });
+          job.status = "canceled";
+          job.completedAt = job.completedAt || new Date();
+          job.nextRunAt = undefined;
+        }
         await job.save();
       }
-      if (!(await finishIfDone(job)) && !available) {
+      if (cancellationRequests.has(String(job._id))) {
+        job.recipients.forEach((item) => {
+          if (item.status === "queued") item.status = "canceled";
+        });
+        job.status = "canceled";
+        job.completedAt = job.completedAt || new Date();
+        job.nextRunAt = undefined;
+        await job.save();
+        cancellationRequests.delete(String(job._id));
+      } else if (!(await finishIfDone(job)) && !available) {
         const latest = await sentInWindow(new Date());
         job.status = "rate-limited";
         job.nextRunAt = new Date(new Date(latest.oldest).getTime() + 60 * 60 * 1000 + 1000);
@@ -189,4 +282,4 @@ const stopEmailWorker = () => {
   if (timer) clearInterval(timer);
 };
 
-module.exports = { HOURLY_LIMIT, processJobs, publicJob, startEmailWorker, stopEmailWorker };
+module.exports = { HOURLY_LIMIT, processJobs, publicJob, requestCancellation, startEmailWorker, stopEmailWorker };

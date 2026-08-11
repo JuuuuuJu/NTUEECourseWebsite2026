@@ -35,11 +35,11 @@ const commonValues = {
 
 const bodies = {
   schedule:
-    '<p>{{name}}同學您好：</p>\n<p>{{categoryName}}預選時程為 {{openTimeText}}，請至 <a href="{{websiteUrl}}">預選網站</a> 完成操作。</p>\n<p>{{importantLinks}}</p>\n<p>如有問題請聯絡 {{contactEmail}}。本信由系統統一寄送，請勿直接回信。</p>',
+    '<p>同學您好：</p>\n<p>{{categoryName}}預選時程為 {{openTimeText}}，請至 <a href="{{websiteUrl}}">預選網站</a> 完成操作。</p>\n<p>{{importantLinks}}</p>\n<p>如有問題請聯絡 {{contactEmail}}。本信由系統統一寄送，請勿直接回信。</p>',
   account:
     '<p>{{name}}同學您好：</p>\n<p>以下是{{categoryName}}預選系統帳號資訊：</p>\n<p>帳號：<b>{{account}}</b><br>密碼：<b>{{password}}</b></p>\n<p>請至 <a href="{{websiteUrl}}">預選網站</a> 參加預選，系統開放時間為 {{openTimeText}}。</p>\n<p>{{importantLinks}}</p>\n<p>如有問題請聯絡 {{contactEmail}}。本信由系統統一寄送，請勿直接回信。</p>',
   reminder:
-    '<p>{{name}}同學您好：</p>\n<p>系統尚未記錄到您完成{{categoryName}}預選，請於 {{openTimeText}} 前至 <a href="{{websiteUrl}}">預選網站</a> 確認並送出。</p>\n<p>{{importantLinks}}</p>\n<p>如有問題請聯絡 {{contactEmail}}。本信由系統統一寄送，請勿直接回信。</p>',
+    '<p>同學您好：</p>\n<p>系統尚未記錄到您完成{{categoryName}}預選，請於 {{openTimeText}} 前至 <a href="{{websiteUrl}}">預選網站</a> 確認並送出。</p>\n<p>{{importantLinks}}</p>\n<p>如有問題請聯絡 {{contactEmail}}。本信由系統統一寄送，請勿直接回信。</p>',
   result:
     '<p>{{name}}同學您好：</p>\n<p>{{categoryName}}預選結果已公布，請至 <a href="{{websiteUrl}}">預選網站</a> 查詢。</p>\n<p>{{importantLinks}}</p>\n<p>如有問題請聯絡 {{contactEmail}}。本信由系統統一寄送，請勿直接回信。</p>',
 };
@@ -59,6 +59,7 @@ const DEFAULT_TEMPLATES = TEMPLATE_KEYS.map((key) => {
 });
 
 const isTemplateKey = (key) => TEMPLATE_KEYS.includes(key);
+const usesBccDelivery = (key) => /\.(schedule|reminder)$/.test(key || "");
 
 module.exports = {
   BUILT_IN_VARIABLES,
@@ -67,4 +68,5 @@ module.exports = {
   PURPOSES,
   TEMPLATE_KEYS,
   isTemplateKey,
+  usesBccDelivery,
 };

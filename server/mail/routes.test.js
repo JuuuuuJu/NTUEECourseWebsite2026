@@ -2,6 +2,8 @@ jest.mock("../database/mongo/model", () => ({
   EmailTemplate: { updateOne: jest.fn(), find: jest.fn(), findOne: jest.fn(), findOneAndUpdate: jest.fn() },
   OpenTime: { findOne: jest.fn() },
   Student: { find: jest.fn(), findOne: jest.fn() },
+  Course: { find: jest.fn() },
+  Selection: { find: jest.fn() },
   EmailJob: { find: jest.fn(), findById: jest.fn(), findByIdAndUpdate: jest.fn(), create: jest.fn(), aggregate: jest.fn(), updateMany: jest.fn() },
 }));
 const express = require("express");
@@ -47,6 +49,8 @@ describe("email admin routes", () => {
     ["get", "/email-jobs/abc"],
     ["get", "/email-jobs/abc/passwords.csv"],
     ["post", "/email-jobs/abc/acknowledge"],
+    ["post", "/email-jobs/abc/cancel"],
+    ["post", "/email-jobs/abc/retry-failed"],
     ["post", "/email-recipients/preview"],
     ["post", "/email-send"],
   ])("non-admin cannot %s %s", async (method, path) => {
@@ -77,6 +81,98 @@ describe("email admin routes", () => {
       .expect(200);
     expect(response.body).toMatchObject({ total: 1, dryRun: 1, sent: 0 });
     expect(model.EmailJob.create).not.toHaveBeenCalled();
+  });
+
+  test("BCC notifications reject recipient-specific rendered content", async () => {
+    const response = await request(app()).post("/email-send")
+      .set("x-user", "ADMIN").set("x-authority", "2")
+      .send({
+        templateKey: template.key,
+        sourceMode: "csv",
+        csvRows: [
+          { userID: "B1", name: "One", email: "one@example.com" },
+          { userID: "B2", name: "Two", email: "two@example.com" },
+        ],
+        dryRun: true,
+      }).expect(400);
+    expect(response.body.error).toContain("寄送前驗證失敗");
+    expect(response.body.statuses.some((status) =>
+      status.message.includes("所有收件人的信件主旨與內容必須完全相同")
+    )).toBe(true);
+    expect(model.EmailJob.create).not.toHaveBeenCalled();
+  });
+
+  test("reminder includes only students with no formal selection in every selected course", async () => {
+    model.Course.find.mockResolvedValue([{ id: "electronics" }, { id: "em" }]);
+    model.Selection.find.mockResolvedValue([
+      { userID: "B1", courseID: "electronics" },
+      { userID: "B2", courseID: "em" },
+    ]);
+    const students = [{ userID: "B3", name: "None saved", grade: 3 }];
+    model.Student.find.mockReturnValue({ sort: jest.fn(async () => students) });
+    const response = await request(app()).post("/email-recipients/preview")
+      .set("x-user", "ADMIN").set("x-authority", "2")
+      .send({
+        templateKey: "ten-select-two.reminder",
+        sourceMode: "database",
+        grades: [3],
+        reminderCourseIDs: ["electronics", "em"],
+      }).expect(200);
+    expect(model.Selection.find).toHaveBeenCalledWith(
+      { courseID: { $in: ["electronics", "em"] } }, "userID"
+    );
+    expect(model.Student.find).toHaveBeenCalledWith({
+      grade: { $in: [3] },
+      userID: { $nin: ["B1", "B2"] },
+    });
+    expect(response.body.recipients).toEqual([
+      { userID: "B3", name: "None saved", grade: 3, email: "B3@ntu.edu.tw" },
+    ]);
+  });
+
+  test("retry-failed queues only failed recipients", async () => {
+    const job = {
+      _id: "job-retry",
+      templateKey: template.key,
+      subject: "Hi",
+      recipientSource: { summary: "CSV" },
+      status: "completed",
+      completedAt: new Date(),
+      recipients: [
+        { _id: "sent", status: "sent", attempts: 1 },
+        { _id: "failed", status: "failed", attempts: 1, error: "SMTP failed" },
+        { _id: "skipped", status: "skipped", attempts: 0, error: "Invalid email" },
+      ],
+      save: jest.fn(async function save() { return this; }),
+    };
+    model.EmailJob.findById.mockResolvedValue(job);
+    const response = await request(app()).post("/email-jobs/job-retry/retry-failed")
+      .set("x-user", "ADMIN").set("x-authority", "2").expect(202);
+    expect(job.recipients.map((recipient) => recipient.status)).toEqual(["sent", "queued", "skipped"]);
+    expect(job.recipients[1].attempts).toBe(1);
+    expect(job.recipients[2].error).toBe("Invalid email");
+    expect(response.body).toMatchObject({ sent: 1, skipped: 1, failed: 0, remaining: 1 });
+  });
+
+  test("cancel stops an active job without changing recipient results", async () => {
+    const job = {
+      _id: "job-cancel",
+      templateKey: template.key,
+      subject: "Hi",
+      recipientSource: { summary: "CSV" },
+      status: "sending",
+      recipients: [
+        { _id: "sent", status: "sent", attempts: 1 },
+        { _id: "queued", status: "queued", attempts: 0 },
+      ],
+      save: jest.fn(async function save() { return this; }),
+    };
+    model.EmailJob.findById.mockResolvedValue(job);
+    const response = await request(app()).post("/email-jobs/job-cancel/cancel")
+      .set("x-user", "ADMIN").set("x-authority", "2").expect(200);
+    expect(job.status).toBe("canceled");
+    expect(job.recipients.map((recipient) => recipient.status)).toEqual(["sent", "canceled"]);
+    expect(response.body).toMatchObject({ status: "canceled", sent: 1, canceled: 1, remaining: 0 });
   });
 
   test("real send persists and returns a queued job without SMTP password", async () => {

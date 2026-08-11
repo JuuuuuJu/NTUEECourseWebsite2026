@@ -142,9 +142,12 @@ export const EmailAPI = {
     axios.post(`/api/email-templates/${key}/preview`, data),
   sendEmail: (data) => axios.post("/api/email-send", data),
   previewRecipients: (data) => axios.post("/api/email-recipients/preview", data),
+  getRecipientCourses: () => axios.get("/api/email-recipients/courses"),
   getJobs: (history = false) => axios.get("/api/email-jobs", { params: { history: history ? 1 : 0 } }),
   getJob: (id) => axios.get(`/api/email-jobs/${id}`),
   acknowledgeJob: (id) => axios.post(`/api/email-jobs/${id}/acknowledge`),
+  cancelJob: (id) => axios.post(`/api/email-jobs/${id}/cancel`),
+  retryFailedJob: (id) => axios.post(`/api/email-jobs/${id}/retry-failed`),
   reportUrl: (id) => `/api/email-jobs/${id}/report.csv`,
   passwordReportUrl: (id) => `/api/email-jobs/${id}/passwords.csv`,
 };

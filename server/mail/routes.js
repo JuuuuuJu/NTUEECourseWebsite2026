@@ -9,6 +9,7 @@ const {
   BUILT_IN_VARIABLES,
   DEFAULT_TEMPLATES,
   isTemplateKey,
+  usesBccDelivery,
 } = require("./templates");
 
 const router = express.Router();
@@ -237,11 +238,33 @@ router.post(
 const normalizeGrades = (grades) =>
   [...new Set((grades || []).map(Number))].filter((grade) => Number.isInteger(grade) && grade >= 1 && grade <= 7).sort();
 
-const buildRows = async ({ sourceMode, grades, csvRows }) => {
+const normalizeCourseIDs = (courseIDs) =>
+  [...new Set((courseIDs || []).filter((id) => typeof id === "string").map((id) => id.trim()).filter(Boolean))].sort();
+
+const validateReminderCourses = async (courseIDs) => {
+  const selectedCourseIDs = normalizeCourseIDs(courseIDs);
+  if (!selectedCourseIDs.length) return { selectedCourseIDs, valid: false };
+  const existing = await model.Course.find({ id: { $in: selectedCourseIDs } }, "id");
+  return {
+    selectedCourseIDs,
+    valid: existing.length === selectedCourseIDs.length,
+  };
+};
+
+const buildRows = async ({ sourceMode, grades, csvRows, reminderCourseIDs = [] }) => {
   if (sourceMode === "database") {
     const selectedGrades = normalizeGrades(grades);
     if (!selectedGrades.length) return [];
-    const students = await model.Student.find({ grade: { $in: selectedGrades } }).sort({ userID: 1 });
+    const studentQuery = { grade: { $in: selectedGrades } };
+    if (reminderCourseIDs.length) {
+      const selections = await model.Selection.find(
+        { courseID: { $in: reminderCourseIDs } },
+        "userID"
+      );
+      const savedUserIDs = [...new Set(selections.map((selection) => selection.userID))];
+      if (savedUserIDs.length) studentQuery.userID = { $nin: savedUserIDs };
+    }
+    const students = await model.Student.find(studentQuery).sort({ userID: 1 });
     return students.map((student) => ({
       userID: student.userID,
       name: student.name,
@@ -252,13 +275,31 @@ const buildRows = async ({ sourceMode, grades, csvRows }) => {
   return csvRows.map((row) => ({ ...row }));
 };
 
+router.get(
+  "/email-recipients/courses",
+  asyncHandler(async (_req, res) => {
+    const courses = await model.Course.find({}, "id name").sort({ id: 1 });
+    res.send(courses.map((course) => ({ id: course.id, name: course.name })));
+  })
+);
+
 router.post(
   "/email-recipients/preview",
   json,
   asyncHandler(async (req, res) => {
     const sourceMode = req.body.sourceMode || "csv";
     if (!["csv", "database"].includes(sourceMode)) return res.status(400).send({ error: "Invalid recipient source." });
-    const rows = await buildRows({ sourceMode, grades: req.body.grades, csvRows: Array.isArray(req.body.csvRows) ? req.body.csvRows : [] });
+    const isReminder = req.body.templateKey && req.body.templateKey.endsWith(".reminder");
+    if (isReminder && sourceMode !== "database") {
+      return res.status(400).send({ error: "未選通知只能使用學生資料庫收件人。" });
+    }
+    let reminderCourseIDs = [];
+    if (isReminder) {
+      const validation = await validateReminderCourses(req.body.reminderCourseIDs);
+      if (!validation.valid) return res.status(400).send({ error: "未選通知須選擇至少一門現存課程。" });
+      reminderCourseIDs = validation.selectedCourseIDs;
+    }
+    const rows = await buildRows({ sourceMode, grades: req.body.grades, csvRows: Array.isArray(req.body.csvRows) ? req.body.csvRows : [], reminderCourseIDs });
     const defaults = await getDefaultTemplateValues();
     const recipients = [];
     for (const row of rows) {
@@ -316,12 +357,14 @@ router.post(
       recipientOverride = "",
       confirmedLargeSend = false,
       smtp = {},
+      reminderCourseIDs = [],
     } = req.body;
     if (
       !isTemplateKey(templateKey) ||
       !["csv", "database"].includes(sourceMode) ||
       !Array.isArray(grades) ||
       !Array.isArray(csvRows) ||
+      !Array.isArray(reminderCourseIDs) ||
       typeof dryRun !== "boolean" ||
       typeof generatePasswords !== "boolean" ||
       typeof updatePasswords !== "boolean" ||
@@ -329,6 +372,16 @@ router.post(
       !smtp || typeof smtp !== "object" || Array.isArray(smtp)
     ) return res.status(400).send({ error: "Invalid send request." });
     const selectedGrades = normalizeGrades(grades);
+    const isReminder = templateKey.endsWith(".reminder");
+    if (isReminder && sourceMode !== "database") {
+      return res.status(400).send({ error: "未選通知只能使用學生資料庫收件人。" });
+    }
+    let selectedReminderCourseIDs = [];
+    if (isReminder) {
+      const validation = await validateReminderCourses(reminderCourseIDs);
+      if (!validation.valid) return res.status(400).send({ error: "未選通知須選擇至少一門現存課程。" });
+      selectedReminderCourseIDs = validation.selectedCourseIDs;
+    }
     if (sourceMode === "database" && selectedGrades.length !== grades.length) {
       return res.status(400).send({ error: "Grades must be selected exactly from 1 through 7." });
     }
@@ -344,7 +397,7 @@ router.post(
     await ensureDefaultTemplates();
     const template = await model.EmailTemplate.findOne({ key: templateKey });
     const defaults = await getDefaultTemplateValues();
-    const rows = await buildRows({ sourceMode, grades: selectedGrades, csvRows });
+    const rows = await buildRows({ sourceMode, grades: selectedGrades, csvRows, reminderCourseIDs: selectedReminderCourseIDs });
     if (!rows.length) return res.status(400).send({ error: "No recipients selected." });
     if (!dryRun && rows.length > 50 && !override && confirmedLargeSend !== true) {
       return res.status(409).send({ error: "Large send confirmation required.", requiresConfirmation: true, count: rows.length });
@@ -352,6 +405,7 @@ router.post(
     const recipients = await prepareRecipients(rows, defaults, variables, override);
     const statuses = [];
     let validationFailed = false;
+    let sharedBccContent;
     for (const recipient of recipients) {
       if (recipient.status === "skipped") {
         statuses.push({ index: recipient.index, identity: recipient.userID, to: recipient.actualRecipient, status: "skipped", message: recipient.error });
@@ -360,7 +414,18 @@ router.post(
       try {
         const previewValues = { ...recipient.values };
         if (generatePasswords) previewValues.password = "dry-run-generated-password";
-        renderTemplate(template, previewValues);
+        const rendered = renderTemplate(template, previewValues);
+        if (usesBccDelivery(templateKey)) {
+          if (!sharedBccContent) sharedBccContent = rendered;
+          else if (
+            rendered.subject !== sharedBccContent.subject ||
+            rendered.html !== sharedBccContent.html
+          ) {
+            const error = new Error("時程通知與未選通知使用 BCC 寄送，所有收件人的信件主旨與內容必須完全相同。");
+            error.code = "BCC_CONTENT_MISMATCH";
+            throw error;
+          }
+        }
         statuses.push({ index: recipient.index, identity: recipient.userID || recipient.email, to: recipient.actualRecipient, status: "dry-run", message: "Rendered successfully; no email sent and no password updated." });
       } catch (error) {
         validationFailed = true;
@@ -370,7 +435,15 @@ router.post(
       }
     }
     if (dryRun || validationFailed) {
+      const validationMessages = [...new Set(
+        statuses
+          .filter((item) => item.status === "failed")
+          .map((item) => item.message)
+      )];
       return res.status(validationFailed ? 400 : 200).send({
+        error: validationFailed
+          ? `寄送前驗證失敗：${validationMessages.join("；")}`
+          : undefined,
         total: recipients.length,
         sent: 0,
         failed: statuses.filter((item) => item.status === "failed").length,
@@ -399,8 +472,11 @@ router.post(
         return res.status(503).send({ error: "SMTP credential encryption is not configured." });
       }
     }
+    const reminderSummary = selectedReminderCourseIDs.length
+      ? `; no checkpoint in courses ${selectedReminderCourseIDs.join(", ")}`
+      : "";
     const summary = sourceMode === "database"
-      ? `Student database — grades ${selectedGrades.join(", ")}`
+      ? `Student database — grades ${selectedGrades.join(", ")}${reminderSummary}`
       : `CSV upload — ${rows.length} rows`;
     const job = await model.EmailJob.create({
       templateKey,
@@ -408,7 +484,7 @@ router.post(
       senderName: template.senderName,
       templateBody: template.body,
       variables: { ...defaults, ...variables },
-      recipientSource: { mode: sourceMode, grades: selectedGrades, summary, override: override || undefined },
+      recipientSource: { mode: sourceMode, grades: selectedGrades, reminderCourseIDs: selectedReminderCourseIDs, summary, override: override || undefined },
       generatePasswords,
       updatePasswords,
       smtpUserid,
@@ -450,6 +526,45 @@ router.post(
     );
     if (!job) return res.sendStatus(404);
     return res.send(require("./jobs").publicJob(job, false));
+  })
+);
+
+router.post(
+  "/email-jobs/:id/cancel",
+  asyncHandler(async (req, res) => {
+    const job = await model.EmailJob.findById(req.params.id);
+    if (!job) return res.sendStatus(404);
+    if (!['queued', 'sending', 'rate-limited'].includes(job.status)) {
+      return res.status(409).send({ error: "此寄信工作已經結束，無法停止。" });
+    }
+    await require("./jobs").requestCancellation(job);
+    return res.send(require("./jobs").publicJob(job));
+  })
+);
+
+router.post(
+  "/email-jobs/:id/retry-failed",
+  asyncHandler(async (req, res) => {
+    const job = await model.EmailJob.findById(req.params.id);
+    if (!job) return res.sendStatus(404);
+    if (!["completed", "failed", "canceled"].includes(job.status)) {
+      return res.status(409).send({ error: "寄信工作尚未結束，無法安全重寄失敗收件人。" });
+    }
+    const failed = job.recipients.filter((recipient) => recipient.status === "failed");
+    if (!failed.length) return res.status(409).send({ error: "此工作沒有失敗收件人可重寄。" });
+    failed.forEach((recipient) => {
+      recipient.status = "queued";
+      recipient.error = undefined;
+      recipient.sentAt = undefined;
+      recipient.reportPassword = undefined;
+    });
+    job.status = "queued";
+    job.nextRunAt = new Date();
+    job.completedAt = undefined;
+    job.acknowledgedAt = undefined;
+    job.acknowledgedBy = undefined;
+    await job.save();
+    return res.status(202).send(require("./jobs").publicJob(job));
   })
 );
 

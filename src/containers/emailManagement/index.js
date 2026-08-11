@@ -74,9 +74,28 @@ const useStyles = makeStyles((theme) => ({
   jobTableWrap: {
     marginTop: theme.spacing(3),
   },
+  courseChecklist: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+    gap: theme.spacing(0.5, 2),
+    margin: theme.spacing(1, 0),
+    padding: theme.spacing(1, 2),
+    border: `1px solid ${theme.palette.divider}`,
+    borderRadius: theme.shape.borderRadius,
+  },
   fileInput: { display: "none" },
 }));
-const errorMessage = (error) => error.response?.data?.error || error.message || "操作失敗";
+const errorMessage = (error) => {
+  const data = error.response?.data;
+  if (data?.error) return data.error;
+  const details = [...new Set(
+    (data?.statuses || [])
+      .filter((status) => status.status === "failed" && status.message)
+      .map((status) => status.message)
+  )];
+  if (details.length) return details.join("；");
+  return error.message || "操作失敗";
+};
 const fmt = (value) => value ? new Date(value).toLocaleString("zh-TW") : "—";
 
 export default function EmailManagement() {
@@ -89,6 +108,8 @@ export default function EmailManagement() {
   const [variables, setVariables] = useState(initialVariables);
   const [sourceMode, setSourceMode] = useState("database");
   const [selectedGrades, setSelectedGrades] = useState([]);
+  const [courses, setCourses] = useState([]);
+  const [reminderCourseIDs, setReminderCourseIDs] = useState([]);
   const [csvRows, setCsvRows] = useState([]);
   const [csvHeaders, setCsvHeaders] = useState([]);
   const [recipients, setRecipients] = useState([]);
@@ -121,13 +142,14 @@ export default function EmailManagement() {
 
   useEffect(() => {
     setBusy(true);
-    Promise.all([EmailAPI.getTemplates(), loadJobs()])
-      .then(([response]) => {
+    Promise.all([EmailAPI.getTemplates(), loadJobs(), EmailAPI.getRecipientCourses()])
+      .then(([response, _jobs, courseResponse]) => {
         const byKey = Object.fromEntries(response.data.templates.map((item) => [item.key, item]));
         setTemplates(byKey);
         setTemplate(byKey[key] || {});
         setBuiltIns(response.data.builtInVariables || []);
         setVariables({ ...initialVariables, ...(response.data.defaultValues || {}) });
+        setCourses(courseResponse.data || []);
       })
       .catch((error) => notify("error", errorMessage(error)))
       .finally(() => setBusy(false));
@@ -139,6 +161,7 @@ export default function EmailManagement() {
       setGeneratePasswords(false);
       setUpdatePasswords(false);
     }
+    if (purpose === "reminder") setSourceMode("database");
   }, [key, purpose, templates]);
 
   useEffect(() => {
@@ -148,12 +171,12 @@ export default function EmailManagement() {
 
   const refreshRecipients = async () => {
     try {
-      const response = await EmailAPI.previewRecipients({ sourceMode, grades: selectedGrades, csvRows });
+      const response = await EmailAPI.previewRecipients({ templateKey: key, sourceMode, grades: selectedGrades, csvRows, reminderCourseIDs });
       setRecipients(response.data.recipients);
       setRecipientCount(response.data.count);
     } catch (error) { notify("error", errorMessage(error)); }
   };
-  useEffect(() => { refreshRecipients(); }, [sourceMode, selectedGrades, csvRows]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { refreshRecipients(); }, [key, sourceMode, selectedGrades, csvRows, reminderCourseIDs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveTemplate = async () => {
     setBusy(true);
@@ -193,6 +216,7 @@ export default function EmailManagement() {
     try {
       const response = await EmailAPI.sendEmail({
         templateKey: key, sourceMode, grades: selectedGrades, csvRows, dryRun,
+        reminderCourseIDs,
         generatePasswords, updatePasswords, variables, recipientOverride,
         smtp: { userid: smtpUserid, password: smtpPassword },
         confirmedLargeSend: largeConfirmed,
@@ -212,6 +236,7 @@ export default function EmailManagement() {
   const requestSend = () => {
     if (!recipientCount) return notify("error", "目前沒有收件人");
     if (sourceMode === "database" && !selectedGrades.length) return notify("error", "請選擇至少一個年級");
+    if (purpose === "reminder" && !reminderCourseIDs.length) return notify("error", "未選通知請選擇至少一門課程");
     if (!dryRun && (!smtpUserid.trim() || !smtpPassword)) return notify("error", "請輸入 SMTP userid 與 password");
     if (dryRun) send(); else setConfirmOpen(true);
   };
@@ -219,6 +244,29 @@ export default function EmailManagement() {
   const acknowledge = async (id) => {
     await EmailAPI.acknowledgeJob(id);
     await loadJobs();
+  };
+
+  const retryFailed = async (id) => {
+    setBusy(true);
+    try {
+      const response = await EmailAPI.retryFailedJob(id);
+      notify("success", `已重新排入 ${response.data.remaining} 位失敗收件人`);
+      await loadJobs();
+    } catch (error) {
+      notify("error", errorMessage(error));
+    } finally { setBusy(false); }
+  };
+
+  const cancelJob = async (id) => {
+    if (!window.confirm("確定要停止這個寄信工作嗎？已經寄出的信件無法收回。")) return;
+    setBusy(true);
+    try {
+      await EmailAPI.cancelJob(id);
+      notify("success", "已停止寄信，正在寄送中的單封信件完成後不會再寄下一封");
+      await loadJobs();
+    } catch (error) {
+      notify("error", errorMessage(error));
+    } finally { setBusy(false); }
   };
 
   const sourceSummary = sourceMode === "database" ? `學生資料庫；年級：${selectedGrades.join(", ") || "未選"}` : `CSV；${csvRows.length} 筆`;
@@ -231,7 +279,7 @@ export default function EmailManagement() {
       <Typography color="textSecondary">工作保存在資料庫；完成後會保留，直到管理員按「OK / 關閉進度」。</Typography>
       {jobs.map((summary) => {
         const job = jobDetails[summary.id] || summary;
-        const percent = job.total ? ((job.sent + job.failed + job.skipped) / job.total) * 100 : 0;
+        const percent = job.total ? ((job.sent + job.failed + job.skipped + (job.canceled || 0)) / job.total) * 100 : 0;
         const detail = (job.recipients || []).filter((item) => {
           const haystack = `${item.userID} ${item.name} ${item.grade} ${item.email} ${item.actualRecipient} ${item.error}`.toLowerCase();
           return haystack.includes(jobSearch.toLowerCase()) && (jobStatus === "all" || item.status === jobStatus);
@@ -243,9 +291,11 @@ export default function EmailManagement() {
           </Grid>
           <Typography>{job.recipientSource?.summary}{job.recipientSource?.override ? `；⚠ 全部實際寄至 ${job.recipientSource.override}` : ""}</Typography>
           <LinearProgress className={classes.progress} variant="determinate" value={percent} />
-          <Typography>已寄 {job.sent} / 失敗 {job.failed} / 略過 {job.skipped} / 剩餘 {job.remaining} / 總計 {job.total}</Typography>
+          <Typography>已寄 {job.sent} / 失敗 {job.failed} / 略過 {job.skipped} / 已停止 {job.canceled || 0} / 剩餘 {job.remaining} / 總計 {job.total}</Typography>
           <Typography>滾動 60 分鐘硬上限：{job.hourlyLimit} 封；下次寄送：{fmt(job.nextRunAt)}</Typography>
           <Typography color="textSecondary">建立 {fmt(job.createdAt)}　更新 {fmt(job.updatedAt)}　完成 {fmt(job.completedAt)}</Typography>
+          {["queued", "sending", "rate-limited"].includes(job.status) && <Button disabled={busy} color="secondary" variant="contained" onClick={() => cancelJob(job.id)}>停止寄信</Button>}
+          {job.failed > 0 && ["completed", "failed", "canceled"].includes(job.status) && <Button disabled={busy} color="secondary" variant="contained" onClick={() => retryFailed(job.id)}>所有失敗收件人一鍵重寄（{job.failed}）</Button>}
           <div className={classes.jobToolbar}>
             <TextField className={classes.jobSearch} variant="outlined" size="small" label="搜尋收件人" value={jobSearch} onChange={(e) => setJobSearch(e.target.value)} />
             <FormControl className={classes.jobStatus} variant="outlined" size="small">
@@ -263,7 +313,7 @@ export default function EmailManagement() {
                 }}
               >
                 <MenuItem value="all">全部狀態</MenuItem>
-                {["queued","sending","sent","failed","skipped"].map((value) => <MenuItem key={value} value={value}>{statusText[value] || value}</MenuItem>)}
+                {["queued","sending","sent","failed","skipped","canceled"].map((value) => <MenuItem key={value} value={value}>{statusText[value] || value}</MenuItem>)}
               </Select>
             </FormControl>
             <Button className={classes.jobToolbarButton} href={EmailAPI.reportUrl(job.id)} variant="outlined">下載報告</Button>
@@ -284,6 +334,7 @@ export default function EmailManagement() {
       <Grid item xs={12}><TextField fullWidth label="主旨" value={template.subject || ""} onChange={(e) => setTemplate({ ...template, subject: e.target.value })} /></Grid>
       <Grid item xs={12}><TextField fullWidth label="寄件者名稱" value={template.senderName || ""} onChange={(e) => setTemplate({ ...template, senderName: e.target.value })} /></Grid>
       <Grid item xs={12}><TextField fullWidth multiline rows={10} variant="outlined" className={classes.editor} label="信件內容（HTML）" value={template.body || ""} onChange={(e) => setTemplate({ ...template, body: e.target.value })} /></Grid>
+      {["schedule", "reminder"].includes(purpose) && <Grid item xs={12}><Alert severity="info">時程通知與未選通知固定以單封 BCC 寄送。所有收件人的主旨與內容必須完全相同；請勿使用姓名、帳號、Email 等會因收件人而改變的欄位，系統也會在建立工作前逐一比對並阻擋不一致內容。</Alert></Grid>}
       <Grid item xs={12}><div className={classes.variables}>{[...new Set([...builtIns, ...csvHeaders])].map((v) => <Chip key={v} label={`{{${v}}}`} />)}</div></Grid>
       {Object.keys(initialVariables).map((v) => <Grid item xs={12} sm={6} key={v}><TextField fullWidth label={v} value={variables[v]} onChange={(e) => setVariables({ ...variables, [v]: e.target.value })} /></Grid>)}
       <Grid item><Button color="primary" variant="contained" disabled={busy} onClick={saveTemplate}>儲存模板</Button></Grid>
@@ -294,7 +345,24 @@ export default function EmailManagement() {
 
     <Paper className={classes.section}>
       <Typography variant="h6">收件人來源（{recipientCount} 人）</Typography>
-      <RadioGroup row value={sourceMode} onChange={(e) => setSourceMode(e.target.value)}><FormControlLabel value="database" control={<Radio />} label="Student database" /><FormControlLabel value="csv" control={<Radio />} label="CSV upload" /></RadioGroup>
+      <RadioGroup row value={sourceMode} onChange={(e) => setSourceMode(e.target.value)}><FormControlLabel value="database" control={<Radio />} label="Student database" /><FormControlLabel disabled={purpose === "reminder"} value="csv" control={<Radio />} label="CSV upload" /></RadioGroup>
+      {purpose === "reminder" && <div>
+        <Typography variant="subtitle1">未儲存志願的課程（可複選）</Typography>
+        <div className={classes.courseChecklist}>
+          {courses.map((course) => <FormControlLabel
+            key={course.id}
+            control={<Checkbox
+              color="primary"
+              checked={reminderCourseIDs.includes(course.id)}
+              onChange={() => setReminderCourseIDs((selected) => selected.includes(course.id)
+                ? selected.filter((id) => id !== course.id)
+                : [...selected, course.id])}
+            />}
+            label={`${course.name}（${course.id}）`}
+          />)}
+        </div>
+        <Typography color="textSecondary">只寄給上述每一門課都沒有正式儲存志願的學生；任一門已有正式 Selection 即排除。</Typography>
+      </div>}
       {sourceMode === "database" ? <><Typography>精確選擇年級：</Typography>{grades.map((grade) => <FormControlLabel key={grade} control={<Checkbox checked={selectedGrades.includes(grade)} onChange={() => setSelectedGrades((old) => old.includes(grade) ? old.filter((x) => x !== grade) : [...old, grade].sort())} />} label={String(grade)} />)}</> : <>
         <input className={classes.fileInput} id="email-csv" type="file" accept=".csv,text/csv" onChange={(e) => handleCsv(e.target.files[0])} /><label htmlFor="email-csv"><Button component="span" variant="outlined">匯入 CSV</Button></label><Button onClick={() => { setCsvRows([]); setCsvHeaders([]); }}>清除</Button>
       </>}
@@ -304,8 +372,15 @@ export default function EmailManagement() {
     <Paper className={`${classes.section} ${classes.override}`}><Typography variant="h6">⚠ 收件人覆寫（僅 staging / 測試）</Typography><Typography>填入後，所有信件都會實際寄到此地址；原始收件人仍顯示於報告。</Typography><TextField fullWidth label="Override email（留白為關閉）" value={recipientOverride} onChange={(e) => setRecipientOverride(e.target.value)} /></Paper>
 
     <Paper className={classes.section}><Typography variant="h6">寄送設定</Typography>
+      <RadioGroup row value={dryRun ? "dry-run" : "real"} onChange={(event) => setDryRun(event.target.value === "dry-run")}>
+        <FormControlLabel value="dry-run" control={<Radio color="primary" />} label="Dry-run（只驗證，不寄信）" />
+        <FormControlLabel value="real" control={<Radio color="secondary" />} label="真實寄信" />
+      </RadioGroup>
       {!dryRun && (
         <Grid container spacing={2}>
+          <Grid item xs={12}>
+            <Alert severity="warning">真實寄信會將工作加入寄送佇列，並寄至下方預覽的實際收件人。{["schedule", "reminder"].includes(purpose) ? " 本通知會以單封 BCC 寄給所有人。" : ""}</Alert>
+          </Grid>
           <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
@@ -330,7 +405,6 @@ export default function EmailManagement() {
           </Grid>
         </Grid>
       )}
-      <FormControlLabel control={<Checkbox checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />} label="Dry-run（立即渲染驗證；不寄信、不更新密碼、不使用額度）" />
       {purpose === "account" && <><FormControlLabel control={<Checkbox checked={generatePasswords} onChange={(e) => { setGeneratePasswords(e.target.checked); if (!e.target.checked) setUpdatePasswords(false); }} />} label="為每位收件人產生密碼" /><FormControlLabel control={<Checkbox disabled={!generatePasswords} checked={updatePasswords} onChange={(e) => setUpdatePasswords(e.target.checked)} />} label="寄送成功後才更新該學生密碼" /></>}
       <br/><Button size="large" color="primary" variant="contained" disabled={busy} onClick={requestSend}>{dryRun ? "執行 Dry-run" : "建立寄信工作並開始寄送"}</Button>
       {result && <Typography>結果：總計 {result.total || 0}、已寄 {result.sent || 0}、失敗 {result.failed || 0}、略過 {result.skipped || 0}</Typography>}

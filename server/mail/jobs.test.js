@@ -8,6 +8,7 @@ jest.mock("../database/mongo/model", () => ({
 }));
 jest.mock("./mailer", () => ({
   createTransport: jest.fn(() => ({ close: jest.fn() })),
+  sendRenderedBccEmail: jest.fn(),
   sendRenderedEmail: jest.fn(),
 }));
 jest.mock("./passwords", () => ({
@@ -19,7 +20,7 @@ jest.mock("./renderTemplate", () => ({
 }));
 
 const model = require("../database/mongo/model");
-const { sendRenderedEmail } = require("./mailer");
+const { sendRenderedBccEmail, sendRenderedEmail } = require("./mailer");
 const { updateStudentPassword } = require("./passwords");
 const { processJobs, publicJob } = require("./jobs");
 
@@ -101,6 +102,7 @@ describe("persistent email jobs", () => {
     expect(updateStudentPassword).not.toHaveBeenCalled();
     expect(recipient.status).toBe("failed");
     expect(recipient.reportPassword).toBe("GENERATED-ONLY-IN-MEMORY");
+    expect(recipient.error).toContain("SMTP failed");
     expect(recipient.error).not.toContain("not-returned");
   });
 
@@ -140,5 +142,26 @@ describe("persistent email jobs", () => {
       expect.anything(),
       expect.objectContaining({ $set: expect.objectContaining({ status: "rate-limited" }) })
     );
+  });
+
+  test("schedule notifications with identical content are sent once using BCC", async () => {
+    const recipients = [
+      { _id: "r1", actualRecipient: "one@example.com", values: { name: "One" }, status: "queued", attempts: 0 },
+      { _id: "r2", actualRecipient: "two@example.com", values: { name: "Two" }, status: "queued", attempts: 0 },
+    ];
+    const job = makeJob(recipients, {
+      templateKey: "ten-select-two.schedule",
+      generatePasswords: false,
+      updatePasswords: false,
+      templateBody: "same body",
+    });
+    model.EmailJob.find.mockReturnValue({ sort: jest.fn(async () => [job]) });
+    model.EmailJob.aggregate.mockResolvedValue([]);
+    sendRenderedBccEmail.mockResolvedValue({});
+    await processJobs();
+    expect(sendRenderedEmail).not.toHaveBeenCalled();
+    expect(sendRenderedBccEmail).toHaveBeenCalledTimes(1);
+    expect(sendRenderedBccEmail.mock.calls[0][0].bcc).toEqual(["one@example.com", "two@example.com"]);
+    expect(recipients.map((recipient) => recipient.status)).toEqual(["sent", "sent"]);
   });
 });
