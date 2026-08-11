@@ -262,6 +262,58 @@ const EmailTemplate = conn.model("EmailTemplate", emailTemplateSchema);
 
 // ========================================
 
+
+const emailJobRecipientSchema = new mongoose.Schema(
+  {
+    index: { type: Number, required: true },
+    userID: String,
+    name: String,
+    grade: Number,
+    email: String,
+    actualRecipient: String,
+    values: { type: mongoose.Schema.Types.Mixed, required: true },
+    status: { type: String, enum: ["queued", "sending", "sent", "failed", "skipped"], required: true, default: "queued" },
+    sentAt: Date,
+    attempts: { type: Number, required: true, default: 0 },
+    reportPassword: String,
+    error: String,
+  },
+  { _id: true }
+);
+
+const emailJobSchema = new mongoose.Schema(
+  {
+    templateKey: { type: String, required: true },
+    subject: { type: String, required: true },
+    senderName: { type: String, required: true },
+    templateBody: { type: String, required: true },
+    variables: { type: mongoose.Schema.Types.Mixed, default: {} },
+    recipientSource: {
+      mode: { type: String, enum: ["csv", "database"], required: true },
+      grades: [Number],
+      summary: { type: String, required: true },
+      override: String,
+    },
+    generatePasswords: { type: Boolean, default: false },
+    updatePasswords: { type: Boolean, default: false },
+    smtpUserid: { type: String, required: true },
+    smtpCredential: mongoose.Schema.Types.Mixed,
+    createdBy: { type: String, required: true },
+    status: { type: String, enum: ["queued", "sending", "rate-limited", "completed", "failed", "canceled"], default: "queued", required: true },
+    nextRunAt: Date,
+    completedAt: Date,
+    acknowledgedAt: Date,
+    acknowledgedBy: String,
+    recipients: { type: [emailJobRecipientSchema], default: [] },
+  },
+  { timestamps: true }
+);
+emailJobSchema.index({ acknowledgedAt: 1, createdAt: -1 });
+emailJobSchema.index({ status: 1, nextRunAt: 1 });
+emailJobSchema.index({ "recipients.sentAt": 1 });
+const EmailJob = conn.model("EmailJob", emailJobSchema);
+
+// ========================================
 module.exports = {
   Course,
   Student,
@@ -272,6 +324,7 @@ module.exports = {
   OpenTime,
   Result,
   EmailTemplate,
+  EmailJob,
   conn,
   courseSchema,
   userSchema,
@@ -282,4 +335,5 @@ module.exports = {
   openTimeSchema,
   resultSchema,
   emailTemplateSchema,
+  emailJobSchema,
 };

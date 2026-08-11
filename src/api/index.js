@@ -141,4 +141,10 @@ export const EmailAPI = {
   previewTemplate: (key, data) =>
     axios.post(`/api/email-templates/${key}/preview`, data),
   sendEmail: (data) => axios.post("/api/email-send", data),
+  previewRecipients: (data) => axios.post("/api/email-recipients/preview", data),
+  getJobs: (history = false) => axios.get("/api/email-jobs", { params: { history: history ? 1 : 0 } }),
+  getJob: (id) => axios.get(`/api/email-jobs/${id}`),
+  acknowledgeJob: (id) => axios.post(`/api/email-jobs/${id}/acknowledge`),
+  reportUrl: (id) => `/api/email-jobs/${id}/report.csv`,
+  passwordReportUrl: (id) => `/api/email-jobs/${id}/passwords.csv`,
 };

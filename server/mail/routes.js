@@ -3,9 +3,8 @@ const asyncHandler = require("express-async-handler");
 
 const constants = require("../constants");
 const model = require("../database/mongo/model");
-const { createTransport, sendRenderedEmail } = require("./mailer");
-const { generatePassword, updateStudentPassword } = require("./passwords");
 const { extractVariables, renderTemplate } = require("./renderTemplate");
+const { encryptCredential } = require("./credentials");
 const {
   BUILT_IN_VARIABLES,
   DEFAULT_TEMPLATES,
@@ -28,7 +27,7 @@ const adminRequired = (req, res, next) => {
   next();
 };
 
-router.use(["/email-templates", "/email-send"], adminRequired);
+router.use(["/email-templates", "/email-send", "/email-recipients", "/email-jobs"], adminRequired);
 
 const ensureDefaultTemplates = async () => {
   await Promise.all(
@@ -235,23 +234,70 @@ router.post(
   })
 );
 
-const buildRows = async (selectedUserIDs, csvRows) => {
-  const rows = [];
-  const selected = [
-    ...new Set(selectedUserIDs.map((id) => String(id).toUpperCase())),
-  ];
-  const students = await model.Student.find({ userID: { $in: selected } });
-  const byID = new Map(students.map((student) => [student.userID, student]));
-  selected.forEach((userID) => {
-    const student = byID.get(userID);
-    rows.push(
-      student
-        ? { data: { userID: student.userID, name: student.name } }
-        : { data: { userID }, skip: "Student not found." }
-    );
-  });
-  csvRows.forEach((row) => rows.push({ data: { ...row } }));
-  return rows;
+const normalizeGrades = (grades) =>
+  [...new Set((grades || []).map(Number))].filter((grade) => Number.isInteger(grade) && grade >= 1 && grade <= 7).sort();
+
+const buildRows = async ({ sourceMode, grades, csvRows }) => {
+  if (sourceMode === "database") {
+    const selectedGrades = normalizeGrades(grades);
+    if (!selectedGrades.length) return [];
+    const students = await model.Student.find({ grade: { $in: selectedGrades } }).sort({ userID: 1 });
+    return students.map((student) => ({
+      userID: student.userID,
+      name: student.name,
+      grade: student.grade,
+      email: `${student.userID}@ntu.edu.tw`,
+    }));
+  }
+  return csvRows.map((row) => ({ ...row }));
+};
+
+router.post(
+  "/email-recipients/preview",
+  json,
+  asyncHandler(async (req, res) => {
+    const sourceMode = req.body.sourceMode || "csv";
+    if (!["csv", "database"].includes(sourceMode)) return res.status(400).send({ error: "Invalid recipient source." });
+    const rows = await buildRows({ sourceMode, grades: req.body.grades, csvRows: Array.isArray(req.body.csvRows) ? req.body.csvRows : [] });
+    const defaults = await getDefaultTemplateValues();
+    const recipients = [];
+    for (const row of rows) {
+      const { values } = await recipientValues(row, defaults);
+      recipients.push({
+        userID: values.userID || "",
+        name: values.name || "",
+        grade: Number(values.grade) || null,
+        email: values.email || "",
+      });
+    }
+    res.send({ count: recipients.length, recipients: recipients.slice(0, 500) });
+  })
+);
+
+const prepareRecipients = async (rows, defaults, variables, override) => {
+  const recipients = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const { student, values } = await recipientValues(row, defaults, variables);
+    const email = values.email && emailPattern.test(values.email) ? values.email : "";
+    const actualRecipient = override || email;
+    const base = {
+      index,
+      userID: values.userID || "",
+      name: values.name || "",
+      grade: Number(values.grade || (student && student.grade)) || undefined,
+      email,
+      actualRecipient,
+      values,
+      attempts: 0,
+    };
+    if (!actualRecipient || !emailPattern.test(actualRecipient)) {
+      recipients.push({ ...base, status: "skipped", error: "Missing or invalid email." });
+    } else {
+      recipients.push({ ...base, status: "queued" });
+    }
+  }
+  return recipients;
 };
 
 router.post(
@@ -260,186 +306,210 @@ router.post(
   asyncHandler(async (req, res) => {
     const {
       templateKey,
-      selectedUserIDs = [],
+      sourceMode = "csv",
+      grades = [],
       csvRows = [],
-      smtp = {},
       dryRun = true,
       generatePasswords = false,
       updatePasswords = false,
       variables = {},
+      recipientOverride = "",
+      confirmedLargeSend = false,
+      smtp = {},
     } = req.body;
     if (
       !isTemplateKey(templateKey) ||
-      !Array.isArray(selectedUserIDs) ||
-      !selectedUserIDs.every((id) => typeof id === "string") ||
+      !["csv", "database"].includes(sourceMode) ||
+      !Array.isArray(grades) ||
       !Array.isArray(csvRows) ||
-      !csvRows.every(
-        (row) => row && typeof row === "object" && !Array.isArray(row)
-      ) ||
       typeof dryRun !== "boolean" ||
       typeof generatePasswords !== "boolean" ||
       typeof updatePasswords !== "boolean" ||
-      !variables ||
-      typeof variables !== "object" ||
-      Array.isArray(variables)
-    ) {
-      return res.status(400).send({ error: "Invalid send request." });
-    }
-    if (!selectedUserIDs.length && !csvRows.length) {
-      return res.status(400).send({ error: "No recipients selected." });
+      typeof recipientOverride !== "string" ||
+      !smtp || typeof smtp !== "object" || Array.isArray(smtp)
+    ) return res.status(400).send({ error: "Invalid send request." });
+    const selectedGrades = normalizeGrades(grades);
+    if (sourceMode === "database" && selectedGrades.length !== grades.length) {
+      return res.status(400).send({ error: "Grades must be selected exactly from 1 through 7." });
     }
     if (generatePasswords && !templateKey.endsWith(".account")) {
-      return res.status(400).send({
-        error: "Passwords can only be generated for account templates.",
-      });
+      return res.status(400).send({ error: "Passwords can only be generated for account templates." });
     }
-    if (
-      !dryRun &&
-      (typeof smtp.userid !== "string" || typeof smtp.password !== "string")
-    ) {
-      return res.status(400).send({ error: "SMTP credentials are required." });
+    if (updatePasswords && !generatePasswords) {
+      return res.status(400).send({ error: "Password updates require generated passwords." });
     }
+    const override = recipientOverride.trim();
+    if (override && !emailPattern.test(override)) return res.status(400).send({ error: "Invalid recipient override." });
 
     await ensureDefaultTemplates();
     const template = await model.EmailTemplate.findOne({ key: templateKey });
     const defaults = await getDefaultTemplateValues();
-    const rows = await buildRows(selectedUserIDs, csvRows);
+    const rows = await buildRows({ sourceMode, grades: selectedGrades, csvRows });
+    if (!rows.length) return res.status(400).send({ error: "No recipients selected." });
+    if (!dryRun && rows.length > 50 && !override && confirmedLargeSend !== true) {
+      return res.status(409).send({ error: "Large send confirmation required.", requiresConfirmation: true, count: rows.length });
+    }
+    const recipients = await prepareRecipients(rows, defaults, variables, override);
     const statuses = [];
-    const prepared = [];
-
-    for (let index = 0; index < rows.length; index += 1) {
-      const { data: row, skip } = rows[index];
-      if (skip) {
-        statuses.push({
-          index,
-          identity: row.userID,
-          status: "skipped",
-          message: skip,
-        });
+    let validationFailed = false;
+    for (const recipient of recipients) {
+      if (recipient.status === "skipped") {
+        statuses.push({ index: recipient.index, identity: recipient.userID, to: recipient.actualRecipient, status: "skipped", message: recipient.error });
         continue;
       }
-      const resolved = await recipientValues(row, defaults, variables);
-      if (!validateRecipientIdentity(resolved.values)) {
-        statuses.push({
-          index,
-          identity: "",
-          status: "skipped",
-          message: "Missing or invalid userID/account/email.",
-        });
-        continue;
-      }
-      if (
-        (generatePasswords || (updatePasswords && row.password)) &&
-        !resolved.student
-      ) {
-        statuses.push({
-          index,
-          identity: resolved.values.userID || resolved.values.email,
-          status: "failed",
-          message:
-            "A matching student record is required to update the password.",
-        });
-        continue;
-      }
-      let rawPassword = resolved.values.password;
-      if (generatePasswords) rawPassword = generatePassword();
-      if (rawPassword !== undefined) resolved.values.password = rawPassword;
       try {
-        const rendered = renderTemplate(template, resolved.values);
-        prepared.push({ index, row, ...resolved, rawPassword, rendered });
+        const previewValues = { ...recipient.values };
+        if (generatePasswords) previewValues.password = "dry-run-generated-password";
+        renderTemplate(template, previewValues);
+        statuses.push({ index: recipient.index, identity: recipient.userID || recipient.email, to: recipient.actualRecipient, status: "dry-run", message: "Rendered successfully; no email sent and no password updated." });
       } catch (error) {
-        if (
-          error.code === "MISSING_VARIABLES" ||
-          error.code === "INVALID_PLACEHOLDERS"
-        ) {
-          statuses.push({
-            index,
-            identity: resolved.values.userID || resolved.values.email,
-            status: "failed",
-            message: error.message,
-          });
-          continue;
-        }
-        throw error;
+        validationFailed = true;
+        statuses.push({ index: recipient.index, identity: recipient.userID || recipient.email, to: recipient.actualRecipient, status: "failed", message: error.message });
+        recipient.status = "failed";
+        recipient.error = error.message;
       }
     }
-
-    const validationFailures = statuses.filter(
-      (status) => status.status === "failed"
-    );
-    if (validationFailures.length) {
-      return res.status(400).send({
-        error: "Template variables are missing for one or more recipients.",
-        total: rows.length,
+    if (dryRun || validationFailed) {
+      return res.status(validationFailed ? 400 : 200).send({
+        total: recipients.length,
         sent: 0,
-        failed: validationFailures.length,
-        skipped: statuses.filter((status) => status.status === "skipped")
-          .length,
+        failed: statuses.filter((item) => item.status === "failed").length,
+        skipped: statuses.filter((item) => item.status === "skipped").length,
+        dryRun: statuses.filter((item) => item.status === "dry-run").length,
         statuses,
+        variables: extractVariables(template.subject, template.body),
       });
     }
 
-    if (dryRun) {
-      prepared.forEach((item) =>
-        statuses.push({
-          index: item.index,
-          identity: item.values.userID || item.values.email,
-          to: item.values.email,
-          status: "dry-run",
-          message:
-            "Rendered successfully; no email sent and no password updated.",
-        })
-      );
-    } else {
-      const transport = createTransport(smtp);
+    const suppliedSmtpUserid = typeof smtp.userid === "string" ? smtp.userid.trim() : "";
+    const suppliedSmtpPassword = typeof smtp.password === "string" ? smtp.password : "";
+    if (Boolean(suppliedSmtpUserid) !== Boolean(suppliedSmtpPassword)) {
+      return res.status(400).send({ error: "SMTP userid and password are both required." });
+    }
+    const smtpUserid = suppliedSmtpUserid || process.env.SMTP_USERID || process.env.SMTP_USER;
+    const smtpPassword = suppliedSmtpPassword || process.env.SMTP_PASSWORD;
+    if (!smtpUserid || !smtpPassword) {
+      return res.status(400).send({ error: "請輸入 SMTP userid 與 password。" });
+    }
+    let smtpCredential;
+    if (suppliedSmtpPassword) {
       try {
-        for (const item of prepared) {
-          try {
-            await sendRenderedEmail({
-              transport,
-              smtpUserid: smtp.userid,
-              senderName: template.senderName,
-              to: item.values.email,
-              rendered: item.rendered,
-            });
-            if (
-              item.student &&
-              item.rawPassword &&
-              (generatePasswords || updatePasswords)
-            ) {
-              await updateStudentPassword(item.student._id, item.rawPassword);
-            }
-            statuses.push({
-              index: item.index,
-              identity: item.values.userID || item.values.email,
-              to: item.values.email,
-              status: "sent",
-            });
-          } catch (error) {
-            statuses.push({
-              index: item.index,
-              identity: item.values.userID || item.values.email,
-              to: item.values.email,
-              status: "failed",
-              message: "Email delivery failed.",
-            });
-          }
-        }
-      } finally {
-        transport.close();
+        smtpCredential = encryptCredential(suppliedSmtpPassword);
+      } catch (error) {
+        return res.status(503).send({ error: "SMTP credential encryption is not configured." });
       }
     }
-
-    statuses.sort((a, b) => a.index - b.index);
-    return res.send({
-      total: rows.length,
-      sent: statuses.filter((status) => status.status === "sent").length,
-      failed: statuses.filter((status) => status.status === "failed").length,
-      skipped: statuses.filter((status) => status.status === "skipped").length,
-      dryRun: statuses.filter((status) => status.status === "dry-run").length,
-      statuses,
-      variables: extractVariables(template.subject, template.body),
+    const summary = sourceMode === "database"
+      ? `Student database — grades ${selectedGrades.join(", ")}`
+      : `CSV upload — ${rows.length} rows`;
+    const job = await model.EmailJob.create({
+      templateKey,
+      subject: template.subject,
+      senderName: template.senderName,
+      templateBody: template.body,
+      variables: { ...defaults, ...variables },
+      recipientSource: { mode: sourceMode, grades: selectedGrades, summary, override: override || undefined },
+      generatePasswords,
+      updatePasswords,
+      smtpUserid,
+      smtpCredential,
+      createdBy: req.session.userID,
+      status: "queued",
+      nextRunAt: new Date(),
+      recipients,
     });
+    return res.status(202).send(require("./jobs").publicJob(job));
+  })
+);
+
+router.get(
+  "/email-jobs",
+  asyncHandler(async (req, res) => {
+    const query = req.query.history === "1" ? {} : { acknowledgedAt: null };
+    const jobs = await model.EmailJob.find(query).sort({ createdAt: -1 }).limit(50);
+    res.send(jobs.map((job) => require("./jobs").publicJob(job, false)));
+  })
+);
+
+router.get(
+  "/email-jobs/:id",
+  asyncHandler(async (req, res) => {
+    const job = await model.EmailJob.findById(req.params.id);
+    if (!job) return res.sendStatus(404);
+    return res.send(require("./jobs").publicJob(job));
+  })
+);
+
+router.post(
+  "/email-jobs/:id/acknowledge",
+  asyncHandler(async (req, res) => {
+    const job = await model.EmailJob.findByIdAndUpdate(
+      req.params.id,
+      { acknowledgedAt: new Date(), acknowledgedBy: req.session.userID },
+      { new: true }
+    );
+    if (!job) return res.sendStatus(404);
+    return res.send(require("./jobs").publicJob(job, false));
+  })
+);
+
+const csvCell = (value) => `"${String(value == null ? "" : value).replace(/"/g, '""')}"`;
+router.get(
+  "/email-jobs/:id/report.csv",
+  asyncHandler(async (req, res) => {
+    const job = await model.EmailJob.findById(req.params.id);
+    if (!job) return res.sendStatus(404);
+    const header = ["userID", "name", "grade", "email", "actualRecipient", "status", "sentAt", "attempts", "error"];
+    const lines = [header.map(csvCell).join(",")].concat(
+      job.recipients.map((item) => header.map((key) => csvCell(item[key])).join(","))
+    );
+    res.type("text/csv").attachment(`email-job-${job._id}.csv`).send(lines.join("\n"));
+  })
+);
+
+
+router.get(
+  "/email-jobs/:id/passwords.csv",
+  asyncHandler(async (req, res) => {
+    const job = await model.EmailJob.findById(req.params.id);
+    if (!job) return res.sendStatus(404);
+    if (!job.generatePasswords) {
+      return res.status(400).send({
+        error: "This job did not generate passwords.",
+      });
+    }
+    const header = [
+      "userID",
+      "name",
+      "grade",
+      "email",
+      "password",
+      "status",
+      "sentAt",
+      "error",
+    ];
+    const lines = [header.map(csvCell).join(",")].concat(
+      job.recipients.map((item) =>
+        [
+          item.userID,
+          item.name,
+          item.grade,
+          item.email,
+          item.reportPassword,
+          item.status,
+          item.sentAt,
+          item.error,
+        ]
+          .map(csvCell)
+          .join(",")
+      )
+    );
+    res.set("Cache-Control", "no-store");
+    res.set("X-Content-Type-Options", "nosniff");
+    return res
+      .type("text/csv")
+      .attachment(`email-job-${job._id}-passwords.csv`)
+      .send(`\uFEFF${lines.join("\n")}`);
   })
 );
 

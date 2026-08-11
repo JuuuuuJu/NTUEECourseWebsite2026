@@ -56,12 +56,21 @@ const useStyles = makeStyles((theme) => ({
   actions: {
     display: "flex",
     justifyContent: "center",
+    alignItems: "center",
     flexWrap: "wrap",
-    gap: theme.spacing(1),
+    gap: theme.spacing(2),
     margin: theme.spacing(2, "auto", 0),
     width: "80%",
+    background: "transparent",
+    boxShadow: "none",
+    "& .MuiButton-root": { minWidth: 160 },
     [theme.breakpoints.down("sm")]: {
       width: "95%",
+      gap: theme.spacing(1),
+      "& .MuiButton-root": {
+        width: "100%",
+        minWidth: 0,
+      },
     },
   },
   digitalLab: {
@@ -446,31 +455,6 @@ const Selection = () => {
               )}
             </Paper>
           )}
-          <div className={classes.actions}>
-            <Button
-              variant="contained"
-              color="primary"
-              disabled={busy}
-              onClick={handleSubmit}
-            >
-              儲存選課
-            </Button>
-            <Button
-              variant="outlined"
-              color="primary"
-              disabled={busy}
-              onClick={handleBackup}
-            >
-              備份
-            </Button>
-            <Button
-              variant="outlined"
-              disabled={busy}
-              onClick={() => setRestoreDialogOpen(true)}
-            >
-              恢復還原點
-            </Button>
-          </div>
           <DragDropContext onDragEnd={onDragEnd}>
             <div className={classes.styledColumns}>
               <Column
@@ -491,6 +475,17 @@ const Selection = () => {
               />
             </div>
           </DragDropContext>
+          <div className={classes.actions}>
+            <Button size="large" variant="contained" color="primary" disabled={busy} onClick={handleSubmit}>
+              正式儲存並提交選課
+            </Button>
+            <Button size="large" variant="outlined" color="primary" disabled={busy} onClick={handleBackup}>
+              備份還原點
+            </Button>
+            <Button size="large" variant="outlined" disabled={busy} onClick={() => setRestoreDialogOpen(true)}>
+              恢復還原點
+            </Button>
+          </div>
           <Dialog
             open={restoreDialogOpen}
             onClose={() => setRestoreDialogOpen(false)}

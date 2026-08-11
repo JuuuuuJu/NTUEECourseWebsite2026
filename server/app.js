@@ -8,6 +8,7 @@ const apiRouter = require("./api");
 const swaggerDocs = require("./swagger.json");
 const model = require("./database/mongo/model");
 const constants = require("./constants");
+const { startEmailWorker } = require("./mail/jobs");
 // ========================================
 
 // ========================================
@@ -26,6 +27,8 @@ db.on("error", console.error.bind(console, "connection error:"));
 db.once("open", () => {
   console.log("Successfully connect to MongoDB!");
   console.log(`dbName = "${process.env.MONGO_DBNAME}"`);
+
+  startEmailWorker().catch((error) => console.error("Unable to start email worker:", error.message));
 
   // cron.schedule("59 */1 * * *", async () => {
   //   try {

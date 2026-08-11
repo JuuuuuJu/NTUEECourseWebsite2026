@@ -1,91 +1,99 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Papa from "papaparse";
 import {
-  Button,
-  Checkbox,
-  Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogContentText,
-  DialogTitle,
-  FormControl,
-  FormControlLabel,
-  Grid,
-  InputLabel,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemText,
-  makeStyles,
-  MenuItem,
-  Paper,
-  Select,
-  Snackbar,
-  TextField,
-  Typography,
+  Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogContentText,
+  DialogTitle, FormControl, FormControlLabel, Grid, InputLabel, LinearProgress,
+  makeStyles, MenuItem, Paper, Radio, RadioGroup, Select, Snackbar, Table,
+  TableBody, TableCell, TableHead, TableRow, TextField, Typography,
 } from "@material-ui/core";
 import { Alert } from "@material-ui/lab";
+import { EmailAPI } from "../../api";
 
-import { EmailAPI, StudentDataAPI } from "../../api";
-
-const categories = [
-  { key: "ten-select-two", label: "十選二" },
-  { key: "ee-lab", label: "電電實驗" },
-];
-const purposes = [
-  { key: "schedule", label: "時程通知" },
-  { key: "account", label: "帳密通知" },
-  { key: "reminder", label: "未選通知" },
-  { key: "result", label: "結果通知" },
-];
-
+const categories = [{ key: "ten-select-two", label: "十選二" }, { key: "ee-lab", label: "電電實驗" }];
+const purposes = [{ key: "schedule", label: "時程通知" }, { key: "account", label: "帳密通知" }, { key: "reminder", label: "未選通知" }, { key: "result", label: "結果通知" }];
+const grades = [1, 2, 3, 4, 5, 6, 7];
+const statusText = { queued: "排隊中", sending: "寄送中", "rate-limited": "速率限制等待", completed: "已完成", failed: "失敗", canceled: "已取消", sent: "已寄送", skipped: "略過" };
+const initialVariables = { websiteUrl: "https://course.ntuee.org/", contactEmail: "ntueesaad2@gmail.com", openTimeText: "", importantLinks: "" };
 const useStyles = makeStyles((theme) => ({
   root: { maxWidth: 1280, margin: "auto" },
   section: { padding: theme.spacing(2), marginBottom: theme.spacing(2) },
-  selector: { marginBottom: theme.spacing(1) },
   editor: { fontFamily: "monospace" },
   variables: { display: "flex", gap: theme.spacing(1), flexWrap: "wrap" },
-  recipients: { maxHeight: 320, overflow: "auto" },
-  preview: { width: "100%", minHeight: 320, border: 0, background: "white" },
-  summary: {
-    whiteSpace: "pre-wrap",
-    fontFamily: "monospace",
-    overflowX: "auto",
+  preview: { width: "100%", minHeight: 260, border: 0, background: "white" },
+  tableWrap: { maxHeight: 360, overflow: "auto" },
+  override: {
+    border: `3px solid ${theme.palette.warning.main}`,
+    background: "#fff8e1",
+    color: "#3e2723",
+    "& .MuiTypography-root": { color: "inherit" },
+    "& .MuiInputBase-root": { color: "#212121" },
+    "& .MuiInputLabel-root": { color: "#5d4037" },
+    "& .MuiInputLabel-root.Mui-focused": { color: "#6d4c41" },
+    "& .MuiFormHelperText-root": { color: "#5d4037" },
+    "& .MuiInputBase-input::placeholder": { color: "#6d4c41", opacity: 1 },
+    "& .MuiInputBase-input.Mui-disabled": {
+      color: "#5f6368",
+      WebkitTextFillColor: "#5f6368",
+      opacity: 1,
+    },
+    "& .MuiInputLabel-root.Mui-disabled": { color: "#6d625f" },
+    "& .MuiInput-underline:before": { borderBottomColor: "#795548" },
+    "& .MuiInput-underline:hover:not(.Mui-disabled):before": { borderBottomColor: "#4e342e" },
+    "& .MuiInput-underline.Mui-disabled:before": { borderBottomColor: "#9e8f8a" },
+  },
+  job: { padding: theme.spacing(2), marginTop: theme.spacing(2) },
+  progress: { height: 12, borderRadius: 6, margin: theme.spacing(1, 0) },
+  jobToolbar: {
+    display: "grid",
+    gridTemplateColumns: "minmax(220px, 1fr) 180px max-content max-content",
+    alignItems: "center",
+    gap: theme.spacing(1.5),
+    marginTop: theme.spacing(2),
+    [theme.breakpoints.down("md")]: {
+      gridTemplateColumns: "minmax(220px, 1fr) 180px",
+    },
+    [theme.breakpoints.down("xs")]: {
+      gridTemplateColumns: "minmax(0, 1fr)",
+    },
+  },
+  jobSearch: {
+    minWidth: 0,
+  },
+  jobStatus: {
+    minWidth: 0,
+  },
+  jobStatusMenu: {
+    backgroundColor: `${theme.palette.background.paper} !important`,
+    opacity: "1 !important",
+  },
+  jobToolbarButton: {
+    width: "100%",
+    maxWidth: "100%",
+    whiteSpace: "normal",
+  },
+  jobTableWrap: {
+    marginTop: theme.spacing(3),
   },
   fileInput: { display: "none" },
 }));
-
-const initialTemplate = { subject: "", senderName: "", body: "" };
-const initialVariables = {
-  websiteUrl: "https://course.ntuee.org/",
-  contactEmail: "ntueesaad2@gmail.com",
-  openTimeText: "",
-  importantLinks: "",
-};
-
-const selectMenuProps = {
-  getContentAnchorEl: null,
-  anchorOrigin: { vertical: "bottom", horizontal: "left" },
-  transformOrigin: { vertical: "top", horizontal: "left" },
-};
-
-const getErrorMessage = (error) =>
-  error.response?.data?.error || error.message || "操作失敗";
+const errorMessage = (error) => error.response?.data?.error || error.message || "操作失敗";
+const fmt = (value) => value ? new Date(value).toLocaleString("zh-TW") : "—";
 
 export default function EmailManagement() {
   const classes = useStyles();
   const [category, setCategory] = useState("ten-select-two");
   const [purpose, setPurpose] = useState("account");
   const [templates, setTemplates] = useState({});
-  const [template, setTemplate] = useState(initialTemplate);
+  const [template, setTemplate] = useState({ subject: "", senderName: "", body: "" });
   const [builtIns, setBuiltIns] = useState([]);
-  const [students, setStudents] = useState([]);
-  const [selected, setSelected] = useState([]);
-  const [search, setSearch] = useState("");
+  const [variables, setVariables] = useState(initialVariables);
+  const [sourceMode, setSourceMode] = useState("database");
+  const [selectedGrades, setSelectedGrades] = useState([]);
   const [csvRows, setCsvRows] = useState([]);
   const [csvHeaders, setCsvHeaders] = useState([]);
-  const [variables, setVariables] = useState(initialVariables);
+  const [recipients, setRecipients] = useState([]);
+  const [recipientCount, setRecipientCount] = useState(0);
+  const [recipientOverride, setRecipientOverride] = useState("");
   const [smtpUserid, setSmtpUserid] = useState("");
   const [smtpPassword, setSmtpPassword] = useState("");
   const [dryRun, setDryRun] = useState(true);
@@ -93,63 +101,59 @@ export default function EmailManagement() {
   const [updatePasswords, setUpdatePasswords] = useState(false);
   const [preview, setPreview] = useState(null);
   const [result, setResult] = useState(null);
+  const [jobs, setJobs] = useState([]);
+  const [jobDetails, setJobDetails] = useState({});
+  const [jobSearch, setJobSearch] = useState("");
+  const [jobStatus, setJobStatus] = useState("all");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [largeConfirmed, setLargeConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [alert, setAlert] = useState({ open: false });
-  const activeEditor = useRef("body");
   const key = `${category}.${purpose}`;
+  const notify = (severity, message) => setAlert({ open: true, severity, message });
 
-  const showAlert = (severity, message) =>
-    setAlert({ open: true, severity, message });
-
-  const load = async () => {
-    setBusy(true);
-    try {
-      const [templateResponse, studentResponse] = await Promise.all([
-        EmailAPI.getTemplates(),
-        StudentDataAPI.getStudentData(),
-      ]);
-      const byKey = Object.fromEntries(
-        templateResponse.data.templates.map((item) => [item.key, item])
-      );
-      setTemplates(byKey);
-      setTemplate(byKey[key] || initialTemplate);
-      setBuiltIns(templateResponse.data.builtInVariables || []);
-      setVariables({
-        ...initialVariables,
-        ...(templateResponse.data.defaultValues || {}),
-      });
-      setStudents(studentResponse.data || []);
-    } catch (error) {
-      showAlert("error", getErrorMessage(error));
-    } finally {
-      setBusy(false);
-    }
+  const loadJobs = async () => {
+    const response = await EmailAPI.getJobs();
+    setJobs(response.data);
+    const detailResponses = await Promise.all(response.data.map((job) => EmailAPI.getJob(job.id)));
+    setJobDetails(Object.fromEntries(detailResponses.map((response) => [response.data.id, response.data])));
   };
 
   useEffect(() => {
-    load();
-    // Initial page load only; selectors switch the cached template below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    setBusy(true);
+    Promise.all([EmailAPI.getTemplates(), loadJobs()])
+      .then(([response]) => {
+        const byKey = Object.fromEntries(response.data.templates.map((item) => [item.key, item]));
+        setTemplates(byKey);
+        setTemplate(byKey[key] || {});
+        setBuiltIns(response.data.builtInVariables || []);
+        setVariables({ ...initialVariables, ...(response.data.defaultValues || {}) });
+      })
+      .catch((error) => notify("error", errorMessage(error)))
+      .finally(() => setBusy(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (templates[key]) setTemplate(templates[key]);
-    setPreview(null);
-    setResult(null);
     if (purpose !== "account") {
       setGeneratePasswords(false);
       setUpdatePasswords(false);
     }
-  }, [key, templates, purpose]);
+  }, [key, purpose, templates]);
 
-  const availableVariables = useMemo(
-    () => [...new Set([...builtIns, ...csvHeaders])],
-    [builtIns, csvHeaders]
-  );
-  const visibleStudents = students.filter((student) =>
-    `${student.id} ${student.name}`.toLowerCase().includes(search.toLowerCase())
-  );
+  useEffect(() => {
+    const timer = setInterval(() => loadJobs().catch(() => {}), 10000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const refreshRecipients = async () => {
+    try {
+      const response = await EmailAPI.previewRecipients({ sourceMode, grades: selectedGrades, csvRows });
+      setRecipients(response.data.recipients);
+      setRecipientCount(response.data.count);
+    } catch (error) { notify("error", errorMessage(error)); }
+  };
+  useEffect(() => { refreshRecipients(); }, [sourceMode, selectedGrades, csvRows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveTemplate = async () => {
     setBusy(true);
@@ -157,469 +161,184 @@ export default function EmailManagement() {
       const response = await EmailAPI.putTemplate(key, template);
       setTemplates((old) => ({ ...old, [key]: response.data }));
       setTemplate(response.data);
-      showAlert("success", "模板已儲存");
-    } catch (error) {
-      showAlert("error", getErrorMessage(error));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const sampleRecipient = () => {
-    const selectedStudent = students.find((student) =>
-      selected.includes(student.id)
-    );
-    return {
-      userID: selectedStudent?.id || "B12345678",
-      account: selectedStudent?.id || "B12345678",
-      email: `${selectedStudent?.id || "B12345678"}@ntu.edu.tw`,
-      name: selectedStudent?.name || "王小明",
-      password: purpose === "account" ? "sample-password" : undefined,
-      ...(csvRows[0] || {}),
-    };
+      notify("success", "模板已儲存");
+    } catch (error) { notify("error", errorMessage(error)); } finally { setBusy(false); }
   };
 
   const renderPreview = async () => {
     setBusy(true);
     try {
+      const sample = recipients[0] || { userID: "B12345678", name: "王小明", grade: 1, email: "B12345678@ntu.edu.tw" };
       const response = await EmailAPI.previewTemplate(key, {
-        subject: template.subject,
-        senderName: template.senderName,
-        body: template.body,
-        recipient: sampleRecipient(),
-        variables,
+        ...template, recipient: { ...sample, account: sample.userID, password: "sample-password" }, variables,
       });
       setPreview(response.data);
-      showAlert("success", "預覽已更新");
-    } catch (error) {
-      showAlert("error", getErrorMessage(error));
-    } finally {
-      setBusy(false);
-    }
+    } catch (error) { notify("error", errorMessage(error)); } finally { setBusy(false); }
   };
 
   const handleCsv = (file) => {
     if (!file) return;
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      transformHeader: (header) => header.trim(),
+    Papa.parse(file, { header: true, skipEmptyLines: true, transformHeader: (header) => header.trim(),
       complete: ({ data, meta, errors }) => {
-        if (errors.length || !meta.fields?.length) {
-          showAlert("error", "CSV 格式無效，第一列必須是欄位名稱");
-          return;
+        if (errors.length || !meta.fields?.some((field) => ["userID", "account", "email"].includes(field))) {
+          notify("error", "CSV 第一列須為欄名，並包含 userID、account 或 email"); return;
         }
-        const hasIdentity = meta.fields.some((field) =>
-          ["userID", "account", "email"].includes(field)
-        );
-        if (!hasIdentity) {
-          showAlert("error", "CSV 必須包含 userID、account 或 email 欄位");
-          return;
-        }
-        setCsvRows(data);
-        setCsvHeaders(meta.fields);
-        showAlert("success", `已載入 ${data.length} 筆 CSV 收件人`);
+        setCsvRows(data); setCsvHeaders(meta.fields); notify("success", `已載入 ${data.length} 筆`);
       },
     });
   };
 
-  const insertVariable = (variable) => {
-    const field = activeEditor.current;
-    const insertion = `{{${variable}}}`;
-    setTemplate((old) => ({
-      ...old,
-      [field]: `${old[field] || ""}${insertion}`,
-    }));
-  };
-
-  const copyVariable = async (variable) => {
-    await navigator.clipboard.writeText(`{{${variable}}}`);
-    showAlert("info", `已複製 {{${variable}}}`);
-  };
-
   const send = async () => {
-    setConfirmOpen(false);
-    setBusy(true);
+    setConfirmOpen(false); setBusy(true);
     try {
       const response = await EmailAPI.sendEmail({
-        templateKey: key,
-        selectedUserIDs: selected,
-        csvRows,
+        templateKey: key, sourceMode, grades: selectedGrades, csvRows, dryRun,
+        generatePasswords, updatePasswords, variables, recipientOverride,
         smtp: { userid: smtpUserid, password: smtpPassword },
-        dryRun,
-        generatePasswords,
-        updatePasswords,
-        variables,
+        confirmedLargeSend: largeConfirmed,
       });
       setResult(response.data);
-      setSmtpPassword("");
-      showAlert(
-        "success",
-        dryRun ? "Dry-run 完成，未寄信且未更新密碼" : "寄信作業完成"
-      );
+      if (!dryRun) {
+        notify("success", "寄信工作已加入佇列，可離開此頁後再回來查看");
+        setSmtpPassword("");
+        await loadJobs();
+      } else notify("success", "Dry-run 完成：未寄信、未更新密碼、未使用額度");
     } catch (error) {
       setResult(error.response?.data || null);
-      setSmtpPassword("");
-      showAlert("error", getErrorMessage(error));
-    } finally {
-      setBusy(false);
-    }
+      notify("error", errorMessage(error));
+    } finally { setBusy(false); setLargeConfirmed(false); }
   };
 
   const requestSend = () => {
-    if (!selected.length && !csvRows.length) {
-      showAlert("error", "請選擇網站學生或匯入 CSV 收件人");
-      return;
-    }
-    if (dryRun) send();
-    else setConfirmOpen(true);
+    if (!recipientCount) return notify("error", "目前沒有收件人");
+    if (sourceMode === "database" && !selectedGrades.length) return notify("error", "請選擇至少一個年級");
+    if (!dryRun && (!smtpUserid.trim() || !smtpPassword)) return notify("error", "請輸入 SMTP userid 與 password");
+    if (dryRun) send(); else setConfirmOpen(true);
   };
 
-  return (
-    <div className={classes.root}>
-      <Typography variant="h4" gutterBottom>
-        寄信管理 / Email Management
-      </Typography>
-      <Paper className={classes.section}>
-        <Grid container spacing={2}>
-          <Grid item xs={12} sm={6}>
-            <FormControl
-              className={classes.selector}
-              fullWidth
-              margin="normal"
-              variant="outlined"
-            >
-              <InputLabel id="email-category-label">類別</InputLabel>
+  const acknowledge = async (id) => {
+    await EmailAPI.acknowledgeJob(id);
+    await loadJobs();
+  };
+
+  const sourceSummary = sourceMode === "database" ? `學生資料庫；年級：${selectedGrades.join(", ") || "未選"}` : `CSV；${csvRows.length} 筆`;
+
+  return <div className={classes.root}>
+    <Typography variant="h4" gutterBottom>寄信管理 / Email Management</Typography>
+
+    {jobs.length > 0 && <Paper className={classes.section}>
+      <Typography variant="h5">寄信工作進度</Typography>
+      <Typography color="textSecondary">工作保存在資料庫；完成後會保留，直到管理員按「OK / 關閉進度」。</Typography>
+      {jobs.map((summary) => {
+        const job = jobDetails[summary.id] || summary;
+        const percent = job.total ? ((job.sent + job.failed + job.skipped) / job.total) * 100 : 0;
+        const detail = (job.recipients || []).filter((item) => {
+          const haystack = `${item.userID} ${item.name} ${item.grade} ${item.email} ${item.actualRecipient} ${item.error}`.toLowerCase();
+          return haystack.includes(jobSearch.toLowerCase()) && (jobStatus === "all" || item.status === jobStatus);
+        });
+        return <Paper variant="outlined" className={classes.job} key={job.id}>
+          <Grid container justifyContent="space-between" spacing={1}>
+            <Grid item><Typography variant="h6">{job.templateKey} — {job.subject}</Typography></Grid>
+            <Grid item><Chip color={["completed"].includes(job.status) ? "primary" : "default"} label={statusText[job.status] || job.status} /></Grid>
+          </Grid>
+          <Typography>{job.recipientSource?.summary}{job.recipientSource?.override ? `；⚠ 全部實際寄至 ${job.recipientSource.override}` : ""}</Typography>
+          <LinearProgress className={classes.progress} variant="determinate" value={percent} />
+          <Typography>已寄 {job.sent} / 失敗 {job.failed} / 略過 {job.skipped} / 剩餘 {job.remaining} / 總計 {job.total}</Typography>
+          <Typography>滾動 60 分鐘硬上限：{job.hourlyLimit} 封；下次寄送：{fmt(job.nextRunAt)}</Typography>
+          <Typography color="textSecondary">建立 {fmt(job.createdAt)}　更新 {fmt(job.updatedAt)}　完成 {fmt(job.completedAt)}</Typography>
+          <div className={classes.jobToolbar}>
+            <TextField className={classes.jobSearch} variant="outlined" size="small" label="搜尋收件人" value={jobSearch} onChange={(e) => setJobSearch(e.target.value)} />
+            <FormControl className={classes.jobStatus} variant="outlined" size="small">
+              <InputLabel id={`job-status-label-${job.id}`}>狀態</InputLabel>
               <Select
-                id="email-category"
-                labelId="email-category-label"
-                label="類別"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                MenuProps={selectMenuProps}
+                labelId={`job-status-label-${job.id}`}
+                label="狀態"
+                value={jobStatus}
+                onChange={(e) => setJobStatus(e.target.value)}
+                MenuProps={{
+                  getContentAnchorEl: null,
+                  anchorOrigin: { vertical: "top", horizontal: "left" },
+                  transformOrigin: { vertical: "bottom", horizontal: "left" },
+                  PaperProps: { className: classes.jobStatusMenu },
+                }}
               >
-                {categories.map((item) => (
-                  <MenuItem key={item.key} value={item.key}>
-                    {item.label}
-                  </MenuItem>
-                ))}
+                <MenuItem value="all">全部狀態</MenuItem>
+                {["queued","sending","sent","failed","skipped"].map((value) => <MenuItem key={value} value={value}>{statusText[value] || value}</MenuItem>)}
               </Select>
             </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <FormControl
-              className={classes.selector}
-              fullWidth
-              margin="normal"
-              variant="outlined"
-            >
-              <InputLabel id="email-purpose-label">用途</InputLabel>
-              <Select
-                id="email-purpose"
-                labelId="email-purpose-label"
-                label="用途"
-                value={purpose}
-                onChange={(e) => setPurpose(e.target.value)}
-                MenuProps={selectMenuProps}
-              >
-                {purposes.map((item) => (
-                  <MenuItem key={item.key} value={item.key}>
-                    {item.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="主旨"
-              value={template.subject || ""}
-              onFocus={() => {
-                activeEditor.current = "subject";
-              }}
-              onChange={(e) =>
-                setTemplate({ ...template, subject: e.target.value })
-              }
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="寄件者顯示名稱"
-              value={template.senderName || ""}
-              onChange={(e) =>
-                setTemplate({ ...template, senderName: e.target.value })
-              }
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              multiline
-              rows={12}
-              variant="outlined"
-              label="完整信件內容（可使用 HTML）"
-              className={classes.editor}
-              value={template.body || ""}
-              onFocus={() => {
-                activeEditor.current = "body";
-              }}
-              onChange={(e) =>
-                setTemplate({ ...template, body: e.target.value })
-              }
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <Typography variant="subtitle1">可用變數</Typography>
-            <div className={classes.variables}>
-              {availableVariables.map((variable) => (
-                <span key={variable}>
-                  <Chip
-                    label={`{{${variable}}}`}
-                    onClick={() => insertVariable(variable)}
-                  />
-                  <Button size="small" onClick={() => copyVariable(variable)}>
-                    複製
-                  </Button>
-                </span>
-              ))}
-            </div>
-          </Grid>
-          {Object.keys(initialVariables).map((variable) => (
-            <Grid item xs={12} sm={6} key={variable}>
-              <TextField
-                fullWidth
-                label={variable}
-                value={variables[variable]}
-                onChange={(e) =>
-                  setVariables({ ...variables, [variable]: e.target.value })
-                }
-              />
-            </Grid>
-          ))}
-          <Grid item>
-            <Button
-              color="primary"
-              variant="contained"
-              disabled={busy}
-              onClick={saveTemplate}
-            >
-              儲存模板
-            </Button>
-          </Grid>
-          <Grid item>
-            <Button variant="outlined" disabled={busy} onClick={renderPreview}>
-              更新預覽
-            </Button>
-          </Grid>
-        </Grid>
-      </Paper>
+            <Button className={classes.jobToolbarButton} href={EmailAPI.reportUrl(job.id)} variant="outlined">下載報告</Button>
+            {job.hasPasswordReport && <Button className={classes.jobToolbarButton} href={EmailAPI.passwordReportUrl(job.id)} color="primary" variant="contained">下載本次寄信密碼紀錄</Button>}
+          </div>
+          <div className={`${classes.tableWrap} ${classes.jobTableWrap}`}><Table size="small" stickyHeader>
+            <TableHead><TableRow>{["userID","姓名","年級","Email / 實際收件人","狀態","寄出時間","嘗試","錯誤"].map((label) => <TableCell key={label}>{label}</TableCell>)}</TableRow></TableHead>
+            <TableBody>{detail.map((item) => <TableRow key={item.id}><TableCell>{item.userID}</TableCell><TableCell>{item.name}</TableCell><TableCell>{item.grade}</TableCell><TableCell>{item.email}{item.actualRecipient !== item.email ? ` → ${item.actualRecipient}` : ""}</TableCell><TableCell>{statusText[item.status] || item.status}</TableCell><TableCell>{fmt(item.sentAt)}</TableCell><TableCell>{item.attempts}</TableCell><TableCell>{item.error}</TableCell></TableRow>)}</TableBody>
+          </Table></div>
+          {["completed","failed","canceled"].includes(job.status) && <Button color="primary" variant="contained" onClick={() => acknowledge(job.id)}>OK / 關閉進度</Button>}
+        </Paper>;
+      })}
+    </Paper>}
 
-      <Paper className={classes.section}>
-        <Typography variant="h6" gutterBottom>
-          信件預覽
-        </Typography>
-        {preview ? (
-          <>
-            <Typography>From: {preview.senderName}</Typography>
-            <Typography>To: {preview.to}</Typography>
-            <Typography>Subject: {preview.subject}</Typography>
-            <iframe
-              title="Email preview"
-              sandbox=""
-              className={classes.preview}
-              srcDoc={preview.html}
-            />
-          </>
-        ) : (
-          <Typography color="textSecondary">
-            選擇範例收件人後按「更新預覽」。
-          </Typography>
-        )}
-      </Paper>
+    <Paper className={classes.section}><Grid container spacing={2}>
+      <Grid item xs={12} sm={6}><FormControl fullWidth><InputLabel>類別</InputLabel><Select value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map((x) => <MenuItem key={x.key} value={x.key}>{x.label}</MenuItem>)}</Select></FormControl></Grid>
+      <Grid item xs={12} sm={6}><FormControl fullWidth><InputLabel>用途</InputLabel><Select value={purpose} onChange={(e) => setPurpose(e.target.value)}>{purposes.map((x) => <MenuItem key={x.key} value={x.key}>{x.label}</MenuItem>)}</Select></FormControl></Grid>
+      <Grid item xs={12}><TextField fullWidth label="主旨" value={template.subject || ""} onChange={(e) => setTemplate({ ...template, subject: e.target.value })} /></Grid>
+      <Grid item xs={12}><TextField fullWidth label="寄件者名稱" value={template.senderName || ""} onChange={(e) => setTemplate({ ...template, senderName: e.target.value })} /></Grid>
+      <Grid item xs={12}><TextField fullWidth multiline rows={10} variant="outlined" className={classes.editor} label="信件內容（HTML）" value={template.body || ""} onChange={(e) => setTemplate({ ...template, body: e.target.value })} /></Grid>
+      <Grid item xs={12}><div className={classes.variables}>{[...new Set([...builtIns, ...csvHeaders])].map((v) => <Chip key={v} label={`{{${v}}}`} />)}</div></Grid>
+      {Object.keys(initialVariables).map((v) => <Grid item xs={12} sm={6} key={v}><TextField fullWidth label={v} value={variables[v]} onChange={(e) => setVariables({ ...variables, [v]: e.target.value })} /></Grid>)}
+      <Grid item><Button color="primary" variant="contained" disabled={busy} onClick={saveTemplate}>儲存模板</Button></Grid>
+      <Grid item><Button variant="outlined" disabled={busy} onClick={renderPreview}>更新預覽</Button></Grid>
+    </Grid></Paper>
 
-      <Grid container spacing={2}>
-        <Grid item xs={12} md={6}>
-          <Paper className={classes.section}>
-            <Typography variant="h6">
-              網站學生（已選 {selected.length} 人）
-            </Typography>
-            <TextField
-              fullWidth
-              label="搜尋學號或姓名"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <List dense className={classes.recipients}>
-              {visibleStudents.map((student) => (
-                <ListItem
-                  button
-                  key={student.id}
-                  onClick={() =>
-                    setSelected((old) =>
-                      old.includes(student.id)
-                        ? old.filter((id) => id !== student.id)
-                        : [...old, student.id]
-                    )
-                  }
-                >
-                  <ListItemIcon>
-                    <Checkbox
-                      edge="start"
-                      checked={selected.includes(student.id)}
-                    />
-                  </ListItemIcon>
-                  <ListItemText primary={`${student.id} — ${student.name}`} />
-                </ListItem>
-              ))}
-            </List>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <Paper className={classes.section}>
-            <Typography variant="h6">CSV 收件人</Typography>
-            <Typography color="textSecondary">
-              第一列需為欄位名稱，且包含 userID、account 或
-              email。其他欄位會成為模板變數。
-            </Typography>
-            <input
-              className={classes.fileInput}
-              id="email-csv"
-              type="file"
-              accept=".csv,text/csv"
-              onChange={(e) => handleCsv(e.target.files[0])}
-            />
-            <label htmlFor="email-csv">
-              <Button component="span" variant="outlined">
-                匯入 CSV
-              </Button>
-            </label>
-            <Button
-              onClick={() => {
-                setCsvRows([]);
-                setCsvHeaders([]);
-              }}
-            >
-              清除 CSV
-            </Button>
-            <Typography>
-              {csvRows.length} 筆；欄位：{csvHeaders.join(", ") || "無"}
-            </Typography>
-          </Paper>
-        </Grid>
-      </Grid>
+    {preview && <Paper className={classes.section}><Typography>To: {preview.to}　Subject: {preview.subject}</Typography><iframe title="Email preview" sandbox="" className={classes.preview} srcDoc={preview.html} /></Paper>}
 
-      <Paper className={classes.section}>
-        <Typography variant="h6">寄送設定</Typography>
+    <Paper className={classes.section}>
+      <Typography variant="h6">收件人來源（{recipientCount} 人）</Typography>
+      <RadioGroup row value={sourceMode} onChange={(e) => setSourceMode(e.target.value)}><FormControlLabel value="database" control={<Radio />} label="Student database" /><FormControlLabel value="csv" control={<Radio />} label="CSV upload" /></RadioGroup>
+      {sourceMode === "database" ? <><Typography>精確選擇年級：</Typography>{grades.map((grade) => <FormControlLabel key={grade} control={<Checkbox checked={selectedGrades.includes(grade)} onChange={() => setSelectedGrades((old) => old.includes(grade) ? old.filter((x) => x !== grade) : [...old, grade].sort())} />} label={String(grade)} />)}</> : <>
+        <input className={classes.fileInput} id="email-csv" type="file" accept=".csv,text/csv" onChange={(e) => handleCsv(e.target.files[0])} /><label htmlFor="email-csv"><Button component="span" variant="outlined">匯入 CSV</Button></label><Button onClick={() => { setCsvRows([]); setCsvHeaders([]); }}>清除</Button>
+      </>}
+      <div className={classes.tableWrap}><Table size="small"><TableHead><TableRow><TableCell>userID</TableCell><TableCell>name</TableCell><TableCell>grade</TableCell><TableCell>email</TableCell></TableRow></TableHead><TableBody>{recipients.map((r, i) => <TableRow key={`${r.userID}-${i}`}><TableCell>{r.userID}</TableCell><TableCell>{r.name}</TableCell><TableCell>{r.grade}</TableCell><TableCell>{r.email}</TableCell></TableRow>)}</TableBody></Table></div>
+    </Paper>
+
+    <Paper className={`${classes.section} ${classes.override}`}><Typography variant="h6">⚠ 收件人覆寫（僅 staging / 測試）</Typography><Typography>填入後，所有信件都會實際寄到此地址；原始收件人仍顯示於報告。</Typography><TextField fullWidth label="Override email（留白為關閉）" value={recipientOverride} onChange={(e) => setRecipientOverride(e.target.value)} /></Paper>
+
+    <Paper className={classes.section}><Typography variant="h6">寄送設定</Typography>
+      {!dryRun && (
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
+              required
               label="SMTP userid"
               value={smtpUserid}
-              onChange={(e) => setSmtpUserid(e.target.value)}
+              onChange={(event) => setSmtpUserid(event.target.value)}
+              helperText="例如 B00123456（可不含 @ntu.edu.tw）"
             />
           </Grid>
           <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
+              required
               type="password"
               autoComplete="new-password"
-              label="SMTP password（不儲存）"
+              label="SMTP password"
               value={smtpPassword}
-              onChange={(e) => setSmtpPassword(e.target.value)}
+              onChange={(event) => setSmtpPassword(event.target.value)}
+              helperText="只會加密保存於本次 job，不會顯示於報告或 log"
             />
-          </Grid>
-          <Grid item xs={12}>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={dryRun}
-                  onChange={(e) => setDryRun(e.target.checked)}
-                />
-              }
-              label="Dry-run（只驗證與渲染，不寄信、不更新密碼）"
-            />
-          </Grid>
-          {purpose === "account" && (
-            <>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={generatePasswords}
-                      onChange={(e) => setGeneratePasswords(e.target.checked)}
-                    />
-                  }
-                  label="由後端產生新密碼，寄送成功後更新學生密碼"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={updatePasswords}
-                      disabled={generatePasswords}
-                      onChange={(e) => setUpdatePasswords(e.target.checked)}
-                    />
-                  }
-                  label="使用 CSV password，寄送成功後更新相符學生密碼"
-                />
-              </Grid>
-            </>
-          )}
-          <Grid item xs={12}>
-            <Button
-              color="primary"
-              variant="contained"
-              disabled={busy}
-              onClick={requestSend}
-            >
-              {dryRun ? "執行 Dry-run" : "寄送信件"}
-            </Button>
           </Grid>
         </Grid>
-      </Paper>
-
-      {result && (
-        <Paper className={classes.section}>
-          <Typography variant="h6">結果摘要</Typography>
-          <Typography>
-            Total {result.total || 0} / Sent {result.sent || 0} / Failed{" "}
-            {result.failed || 0} / Skipped {result.skipped || 0} / Dry-run{" "}
-            {result.dryRun || 0}
-          </Typography>
-          <pre className={classes.summary}>
-            {JSON.stringify(result.statuses || [], null, 2)}
-          </pre>
-        </Paper>
       )}
+      <FormControlLabel control={<Checkbox checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />} label="Dry-run（立即渲染驗證；不寄信、不更新密碼、不使用額度）" />
+      {purpose === "account" && <><FormControlLabel control={<Checkbox checked={generatePasswords} onChange={(e) => { setGeneratePasswords(e.target.checked); if (!e.target.checked) setUpdatePasswords(false); }} />} label="為每位收件人產生密碼" /><FormControlLabel control={<Checkbox disabled={!generatePasswords} checked={updatePasswords} onChange={(e) => setUpdatePasswords(e.target.checked)} />} label="寄送成功後才更新該學生密碼" /></>}
+      <br/><Button size="large" color="primary" variant="contained" disabled={busy} onClick={requestSend}>{dryRun ? "執行 Dry-run" : "建立寄信工作並開始寄送"}</Button>
+      {result && <Typography>結果：總計 {result.total || 0}、已寄 {result.sent || 0}、失敗 {result.failed || 0}、略過 {result.skipped || 0}</Typography>}
+    </Paper>
 
-      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
-        <DialogTitle>確認寄送真實信件</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            即將處理 {selected.length + csvRows.length}{" "}
-            筆收件人。寄送成功的帳密信可能同時更新學生登入密碼；此操作無法由系統自動復原。
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfirmOpen(false)}>取消</Button>
-          <Button color="primary" variant="contained" onClick={send}>
-            確認寄送
-          </Button>
-        </DialogActions>
-      </Dialog>
-      <Snackbar
-        open={alert.open}
-        autoHideDuration={6000}
-        onClose={() => setAlert({ ...alert, open: false })}
-      >
-        <Alert variant="filled" severity={alert.severity || "info"}>
-          {alert.message}
-        </Alert>
-      </Snackbar>
-    </div>
-  );
+    <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}><DialogTitle>確認真實寄送</DialogTitle><DialogContent><DialogContentText>
+      來源：{sourceSummary}<br/>人數：{recipientCount}<br/>模板：{key} — {template.subject}<br/>密碼模式：{generatePasswords ? (updatePasswords ? "產生，且每封成功後更新" : "僅產生於信件") : "不產生 / 不更新"}<br/>SMTP userid：{smtpUserid || "未填"}<br/>Override：{recipientOverride || "關閉"}
+    </DialogContentText>{recipientCount > 50 && !recipientOverride && <FormControlLabel control={<Checkbox checked={largeConfirmed} onChange={(e) => setLargeConfirmed(e.target.checked)} />} label={`我確認要寄送 ${recipientCount} 位真實收件人（超過 50 人）`} />}</DialogContent><DialogActions><Button onClick={() => setConfirmOpen(false)}>取消</Button><Button color="primary" variant="contained" disabled={recipientCount > 50 && !recipientOverride && !largeConfirmed} onClick={send}>確認建立工作</Button></DialogActions></Dialog>
+    <Snackbar open={alert.open} autoHideDuration={6000} onClose={() => setAlert({ ...alert, open: false })}><Alert variant="filled" severity={alert.severity || "info"}>{alert.message}</Alert></Snackbar>
+  </div>;
 }

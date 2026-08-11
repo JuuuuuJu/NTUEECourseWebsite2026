@@ -15,6 +15,7 @@ const { promisify } = require("util");
 const { string } = require("yargs");
 const constants = require("./constants");
 const model = require("./database/mongo/model");
+const { requestedStudentFields, serializeStudents } = require("./database/publicStudents");
 const mailRouter = require("./mail/routes");
 const digitalLabRouter = require("./digitalLab/routes");
 const backupService = require("./backup/service");
@@ -297,26 +298,14 @@ router
   .get(
     permissionRequired(constants.AUTHORITY_MAINTAINER),
     asyncHandler(async (req, res, next) => {
-      const studentGroup = await model.Student.find({}).exec();
-      const filtered = [];
-      const items = Object.keys(req.query);
-      let pass = true;
-      studentGroup.forEach((student) => {
-        const filteredstudent = {};
-        filteredstudent.id = student.userID;
-        items.forEach((item) => {
-          if (item === "password") {
-            pass = false;
-          }
-          filteredstudent[item] = student[item];
-        });
-        filtered.push(filteredstudent);
-      });
-      if (!pass) {
-        res.status(403).end();
-        return;
+      let fields;
+      try {
+        fields = requestedStudentFields(req.query);
+      } catch (error) {
+        return res.status(error.status || 400).send({ error: error.message });
       }
-      res.send(filtered);
+      const studentGroup = await model.Student.find({}).exec();
+      return res.send(serializeStudents(studentGroup, fields));
     })
   )
   .post(
