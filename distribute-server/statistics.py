@@ -2,6 +2,8 @@ import csv, io
 import pandas as pd
 import numpy as np
 
+DIGITAL_LAB_OPTION = "數電實驗"
+
 class Analysis():
     def __init__(self, courses, students, results):
         self._courses = courses
@@ -78,24 +80,31 @@ class Analysis():
         for course in self._courses:
             course_name = course._name
             course_id = course._id
-            analysis_list = [0]*10
-            selection_matrix = self._selections_df.filter(like=course_id, axis=1).to_numpy()
-            result_matrix = self._result_df.filter(like=course_id, axis=1).to_numpy()
-            analysis_matrix = np.multiply(selection_matrix, result_matrix)
-            
-            for order in range(10):
-                analysis_list[order] = int(np.sum(analysis_matrix == order+1))
-            
-            analysis_pick_list = [0]*3
-            analysis_pick_matrix = np.sum(analysis_matrix > 0, axis=1)
-            analysis_zero_matrix = np.logical_and((np.sum(selection_matrix > 0, axis=1)>0), (np.sum(analysis_matrix>0, axis=1) == 0))
+            normal_options = [
+                name for name in course._options if name != DIGITAL_LAB_OPTION
+            ]
+            normal_columns = [
+                "%s_%s" % (course_id, name) for name in normal_options
+            ]
+            all_result_columns = [
+                "%s_%s" % (course_id, name) for name in course._options
+            ]
+            selection_matrix = self._selections_df[normal_columns].to_numpy()
+            normal_result_matrix = self._result_df[normal_columns].to_numpy()
+            total_result_matrix = self._result_df[all_result_columns].to_numpy()
+            analysis_matrix = np.multiply(selection_matrix, normal_result_matrix)
 
-            analysis_pick_list[0] = int(np.sum(analysis_zero_matrix))
-            for i in range(1, 3):
-                analysis_pick_list[i] = int(np.sum(analysis_pick_matrix == i))
-            
-            analysis_order_df.loc[course_name, :] = analysis_pick_list + analysis_list
-        
+            analysis_list = [
+                int(np.sum(analysis_matrix == order + 1)) for order in range(10)
+            ]
+            result_count = np.sum(total_result_matrix > 0, axis=1)
+            analysis_pick_list = [
+                int(np.sum(result_count == count)) for count in range(3)
+            ]
+            analysis_order_df.loc[course_name, :] = (
+                analysis_pick_list + analysis_list
+            )
+
         self._analysis_order_df = analysis_order_df
 
     # Analysis of grade distribution
@@ -136,9 +145,11 @@ class Analysis():
             course_id = course._id
             analysis_dict[course_id] = dict()
             for option_name in course._options:
+                if option_name == DIGITAL_LAB_OPTION:
+                    continue
                 option_full_name = "%s_%s" % (course_id, option_name)
                 df_index = [("大%d") % (i+1) for i in range(4)]
-                df_column = [("第%d志願") % (i+1) for i in range(len(course._options))]
+                df_column = [("第%d志願") % (i+1) for i in range(len([name for name in course._options if name != DIGITAL_LAB_OPTION]))]
                 df = pd.DataFrame(0, index=df_index, columns=df_column)
                 for student in self._students:
                     student_grade = min(student._grade, 4)
@@ -155,12 +166,15 @@ class Analysis():
         analysis_dict = dict()
         for course in self._courses:
             course_id = course._id
-            num_options = len(course._options)
+            normal_options = [
+                name for name in course._options if name != DIGITAL_LAB_OPTION
+            ]
+            num_options = len(normal_options)
             df_column = [("第%d志願") % (i+1) for i in range(num_options)]
-            df_index = [option_name for option_name in course._options]
+            df_index = normal_options
             df = pd.DataFrame(0, index=df_index, columns=df_column)
                 
-            for i, option_name in enumerate(course._options):
+            for i, option_name in enumerate(normal_options):
                 option_full_name = "%s_%s" % (course_id, option_name)
 
                 selection_matrix = self._selections_df.filter(like=option_full_name, axis=1).to_numpy()

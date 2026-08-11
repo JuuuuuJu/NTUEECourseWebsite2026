@@ -10,8 +10,16 @@ MONGO_PORT = os.environ.get("MONGO_PORT", 27017)
 MONGO_DBNAME = os.environ.get("MONGO_DBNAME", "ntuee-course")
 MONGO_USERNAME = os.environ.get("MONGO_USERNAME")
 MONGO_PASSWORD = os.environ.get("MONGO_PASSWORD")
+MONGO_AUTH_SOURCE = os.environ.get("MONGO_AUTH_SOURCE", "admin")
 
-url = "mongodb://%s:%s@%s:%s/%s" % (MONGO_USERNAME, MONGO_PASSWORD, MONGO_HOST, MONGO_PORT, MONGO_DBNAME)
+url = "mongodb://%s:%s@%s:%s/%s?authSource=%s" % (
+    MONGO_USERNAME,
+    MONGO_PASSWORD,
+    MONGO_HOST,
+    MONGO_PORT,
+    MONGO_DBNAME,
+    MONGO_AUTH_SOURCE,
+)
 client = MongoClient(url)
 # ========================================
 

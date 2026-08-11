@@ -15,13 +15,21 @@ MONGO_PORT = os.environ.get("MONGO_PORT", 27017)
 MONGO_DBNAME = os.environ.get("MONGO_DBNAME", "ntuee-course")
 MONGO_USERNAME = os.environ.get("MONGO_USERNAME")
 MONGO_PASSWORD = os.environ.get("MONGO_PASSWORD")
+MONGO_AUTH_SOURCE = os.environ.get("MONGO_AUTH_SOURCE", "admin")
 
-url = "mongodb://%s:%s@%s:%s/%s" % (MONGO_USERNAME, MONGO_PASSWORD, MONGO_HOST, MONGO_PORT, MONGO_DBNAME)
+url = "mongodb://%s:%s@%s:%s/%s?authSource=%s" % (
+    MONGO_USERNAME,
+    MONGO_PASSWORD,
+    MONGO_HOST,
+    MONGO_PORT,
+    MONGO_DBNAME,
+    MONGO_AUTH_SOURCE,
+)
 client = MongoClient(url)
 # ========================================
 
 
-def genCourse(raw_courses):
+def genCourse(raw_courses, include_digital_lab=False):
     courses = []
     for data in raw_courses.find():
         courseDict = {}
@@ -33,7 +41,11 @@ def genCourse(raw_courses):
         courseDict["students"] = data["students"]
         courseDict["options"] = {}
         for op in data["options"]:
-            if data["type"] == "Ten-Select-Two" and op["name"] == DIGITAL_LAB_OPTION:
+            if (
+                not include_digital_lab
+                and data["type"] == "Ten-Select-Two"
+                and op["name"] == DIGITAL_LAB_OPTION
+            ):
                 continue
             option = {
                 "limit": op["limit"],
@@ -251,7 +263,7 @@ def statistics():
     raw_results = db["results"]
 
     try:
-        courses = genCourse(raw_courses)
+        courses = genCourse(raw_courses, include_digital_lab=True)
     except ValueError:
         return "Invalid course type detected", 400
 
