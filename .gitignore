@@ -140,6 +140,7 @@ dist
 # private datas
 
 server/database/private-data/
+deploy-backups/
 tmp/staging-stress/
 tmp/staging-second-round/
 .env
