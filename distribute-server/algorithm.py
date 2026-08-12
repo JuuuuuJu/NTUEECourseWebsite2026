@@ -475,7 +475,7 @@ class Course:
         self._name = course["name"]
         self._id = course["id"]
         self._type = course["type"]
-        self.limit_students = course["students"]
+        self.limit_students = course.get("students", [])
         self._options = dict()
         self._students = dict()     # candidate list
         self._has_selected_num_list = dict()

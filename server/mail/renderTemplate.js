@@ -25,6 +25,13 @@ const renderString = (source, values) =>
     String(values[variable])
   );
 
+const renderHtml = (source, values) =>
+  renderString(source, values)
+    // Formatting newlines between HTML tags are not visible content. Turning
+    // them into <br> adds an extra blank line on top of block element margins.
+    .replace(/>\s*</g, "><")
+    .replace(/\r?\n/g, "<br>");
+
 const renderTemplate = (template, values) => {
   const invalid = [
     ...`${template.subject || ""}${template.body || ""}`.matchAll(
@@ -55,7 +62,7 @@ const renderTemplate = (template, values) => {
   }
   return {
     subject: renderString(template.subject, values),
-    html: renderString(template.body, values).replace(/\r?\n/g, "<br>"),
+    html: renderHtml(template.body, values),
   };
 };
 

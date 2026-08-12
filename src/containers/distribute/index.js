@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import clsx from "clsx";
 
 // material-ui
@@ -104,12 +104,9 @@ const columns = [
 ];
 export default function Distribute() {
   const classes = useStyles();
-  const resultBlobLinkRef = useRef();
-  const statisticsBlobLinkRef = useRef();
   const [courses, setCourses] = useState([]);
   const [students, setStudents] = useState([]);
   const [activeStep, setActiveStep] = useState(0);
-  const [blobURL, setBlobURL] = useState("");
   const [preselectUploaded, setPreselectUploaded] = useState(false);
   const [preselectLoaded, setPreselectLoaded] = useState(false);
   const [preselectFilename, setPreselectFilename] = useState("");
@@ -124,44 +121,6 @@ export default function Distribute() {
   const [resetSelectionOpened, setResetSelectionOpened] = useState(false);
   const [resetSelectionInput, setResetSelectionInput] = useState("");
   const [lastBackup, setLastBackup] = useState(null);
-
-  const handleGetDistribution = () => {
-    DistributeAPI.getResult()
-      .then(({ data }) => {
-        setBlobURL(
-          window.URL.createObjectURL(
-            new Blob([data], { type: "application/csv" })
-          )
-        );
-        resultBlobLinkRef.current.click();
-      })
-      .catch(() =>
-        setAlert({
-          open: true,
-          severity: "error",
-          msg: "Cannot download distribution result.",
-        })
-      );
-  };
-
-  const handleGetStatistics = () => {
-    DistributeAPI.getStatistics()
-      .then(({ data }) => {
-        setBlobURL(
-          window.URL.createObjectURL(
-            new Blob([data], { type: "application/csv" })
-          )
-        );
-        statisticsBlobLinkRef.current.click();
-      })
-      .catch(() =>
-        setAlert({
-          open: true,
-          severity: "error",
-          msg: "Cannot download distribution statistics.",
-        })
-      );
-  };
 
   const refreshLastBackup = () =>
     BackupAPI.list()
@@ -646,7 +605,9 @@ export default function Distribute() {
                     variant="outlined"
                     color="primary"
                     className={classes.button}
-                    onClick={handleGetDistribution}
+                    onClick={() =>
+                      window.location.assign(`/api/result.csv?t=${Date.now()}`)
+                    }
                   >
                     Download distribution result
                   </Button>
@@ -654,7 +615,9 @@ export default function Distribute() {
                     variant="outlined"
                     color="primary"
                     className={classes.button}
-                    onClick={handleGetStatistics}
+                    onClick={() =>
+                      window.location.assign(`/api/statistics.csv?t=${Date.now()}`)
+                    }
                   >
                     Download distribution statistics
                   </Button>
@@ -747,22 +710,6 @@ export default function Distribute() {
           {alert?.msg}
         </Alert>
       </Snackbar>
-      <a
-        ref={resultBlobLinkRef}
-        href={blobURL}
-        download="result.csv"
-        style={{ display: "none" }}
-      >
-        {" "}
-      </a>
-      <a
-        ref={statisticsBlobLinkRef}
-        href={blobURL}
-        download="statistics.csv"
-        style={{ display: "none" }}
-      >
-        {" "}
-      </a>
     </div>
   );
 }

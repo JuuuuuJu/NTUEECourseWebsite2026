@@ -143,6 +143,7 @@ server/database/private-data/
 tmp/staging-stress/
 tmp/staging-second-round/
 .env
+.env.staging
 
 tmp/staging-email-stress/
 tmp/db-backups/

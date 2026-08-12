@@ -17,40 +17,49 @@ email: `b07901016@ntu.edu.tw`
 - [劉奇聖](https://github.com/MortalHappiness), email: `b07901069@ntu.edu.tw`
 - [賴群貿](https://github.com/Mecoli1219), email: `b09901186@ntu.edu.tw`
 
-## Production deployment
+## 部署
 
-### Deploy
+### Production
 
-先確認 production 的 `.env` 已正確設定，再更新程式並執行部署：
-
-```shell
-$ git fetch
-$ git pull --ff-only
-$ ./deploy.sh --production
-```
-
-`deploy.sh` 會自動相容 `docker compose` 與舊版 `docker-compose`，依序備份目前非空的 MongoDB、停止舊容器、重建服務、恢復所選資料，最後檢查前端及 API。Docker named volume 會保留，不會因部署而清空。
-
-部署前的 DB archive 固定存放於 repo 同層的 `NTUEECourseWebsite2026-deploy-backups/`。互動選單使用方向鍵選擇、Enter 確認，且只會列出此資料夾第一層的 `.gz`：
-
-- `Keep existing Docker volume data`：沿用目前 DB，不從外部備份恢復。
-- `*.gz`：直接恢復選定的 MongoDB archive。
-
-請勿使用 `docker compose down --volumes` 或 `docker-compose down -v`，否則會刪除 DB volume。
-
-只檢查設定而不變更 Docker：
+第一次從 2021 版切換至 2026 版：
 
 ```shell
-$ ./deploy.sh --production --check
+cp ../NTUEECourseWebsite2021/.env .env
+# 確認 .env，特別是 EMAIL_CREDENTIAL_KEY、WEBSITE_URL、CONTACT_EMAIL
+./deploy_production.sh --check
+./deploy_production.sh
 ```
 
-不重新 build image：
+之後更新版本：
 
 ```shell
-$ ./deploy.sh --production --no-build
+git pull --ff-only
+./deploy.sh --production --check
+./deploy.sh --production
 ```
 
-Production compose 對外提供 `http://127.0.0.1:3000`；`https://course.ntuee.org` 仍須由真 server 外層 nginx 與 TLS 憑證反向代理至此服務。
+部署時會自動備份 MongoDB，並詢問要沿用目前資料或恢復 `.gz` 備份。備份位於 repo 同層的 `NTUEECourseWebsite2026-deploy-backups/`。
+
+Production 服務位於 `http://127.0.0.1:3000`，正式網域需由主機 nginx 反向代理至此。
+
+### Staging
+
+```shell
+cp .env.staging.example .env.staging  # 第一次執行時建立，並更換範例密碼
+./deploy.sh --staging --check
+./deploy.sh --staging
+```
+
+Staging 與 production 的容器及資料庫互相獨立，服務位於 `http://127.0.0.1:3001`。
+
+### Rollback 至 2021 版
+
+```shell
+./deploy_old.sh --check
+./deploy_old.sh
+```
+
+> 請勿執行 `docker compose down --volumes` 或 `docker-compose down -v`，否則會刪除資料庫 volume。
 
 ## Quick Start (Development mode)
 

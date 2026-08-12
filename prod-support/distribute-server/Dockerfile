@@ -13,10 +13,5 @@ COPY ["./distribute-server/*.py", "./"]
 # COPY [".env", "./"]
 
 ENV FLASK_ENV production
-ENV MONGO_HOST course-mongodb
-ENV MONGO_PORT 27017
-ENV MONGO_DBNAME ntuee-course
-ENV MONGO_USERNAME eeinfo
-ENV MONGO_PASSWORD R9ujPAQBk4X2fdkv
 # startup command
 CMD ["python", "server.py"]

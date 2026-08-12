@@ -1,0 +1,81 @@
+services:
+  nginx:
+    build:
+      context: ./prod-support/nginx
+    ports:
+      - "127.0.0.1:3001:80"
+    depends_on:
+      - course-frontend
+      - course-backend
+      - course-distribute-server
+    networks: [course-staging]
+    restart: unless-stopped
+
+  course-frontend:
+    build:
+      context: .
+      dockerfile: ./prod-support/frontend/Dockerfile
+    expose: ["3000"]
+    networks: [course-staging]
+    restart: unless-stopped
+
+  course-backend:
+    build:
+      context: .
+      dockerfile: ./prod-support/backend/Dockerfile
+    expose: ["8000"]
+    networks: [course-staging]
+    depends_on:
+      - course-mongodb
+      - course-redisdb
+    env_file: [.env.staging]
+    environment:
+      NODE_ENV: staging
+      DISTRIBUTE_SERVER_HOST: course-distribute-server
+      DISTRIBUTE_SERVER_PORT: 8001
+      MONGO_HOST: course-mongodb
+      MONGO_PORT: 27017
+      REDIS_HOST: course-redisdb
+      REDIS_PORT: 6379
+      BACKUP_DIR: /app/tmp/db-backups
+      WEBSITE_URL: http://127.0.0.1:3001/
+    volumes:
+      - course-staging-db-backups:/app/tmp/db-backups
+    restart: unless-stopped
+
+  course-mongodb:
+    image: mongo:8.0.4
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+    expose: ["27017"]
+    networks: [course-staging]
+    volumes:
+      - course-staging-mongo-data:/data/db
+    restart: unless-stopped
+
+  course-redisdb:
+    image: redis:7-alpine
+    expose: ["6379"]
+    networks: [course-staging]
+    restart: unless-stopped
+
+  course-distribute-server:
+    build:
+      context: .
+      dockerfile: ./prod-support/distribute-server/Dockerfile
+    expose: ["8001"]
+    networks: [course-staging]
+    env_file: [.env.staging]
+    environment:
+      MONGO_HOST: course-mongodb
+      MONGO_PORT: 27017
+      MONGO_AUTH_SOURCE: admin
+    restart: unless-stopped
+
+networks:
+  course-staging:
+
+volumes:
+  course-staging-mongo-data:
+  course-staging-db-backups:

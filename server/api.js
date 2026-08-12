@@ -921,6 +921,8 @@ router.get(
       rows.push([result.studentID, result.courseName, result.optionName]);
     });
     const output = await csvStringifyPromise(rows);
+    res.setHeader("cache-control", "no-store, max-age=0");
+    res.setHeader("pragma", "no-cache");
     res.setHeader("content-type", "application/csv");
     res.setHeader("content-disposition", "attachment; filename=result.csv");
     res.status(200).send(output);
@@ -939,6 +941,8 @@ router.get(
     );
     const csvString = await resp.text();
     if (resp.ok) {
+      res.setHeader("cache-control", "no-store, max-age=0");
+      res.setHeader("pragma", "no-cache");
       res.setHeader("content-type", "application/csv");
       res.setHeader(
         "content-disposition",

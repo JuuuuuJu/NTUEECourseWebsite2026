@@ -9,11 +9,12 @@ BACKUP=1
 DB_RECOVERY_STATUS="not checked"
 RESTORE_MODE="keep"
 RESTORE_SOURCE=""
+REQUESTED_RESTORE=""
 BACKUP_DIR="$(dirname "$ROOT_DIR")/NTUEECourseWebsite2026-deploy-backups"
 
 usage() {
   cat <<'EOF'
-Usage: ./deploy.sh [--production|--staging] [--no-build] [--skip-backup] [--check]
+Usage: ./deploy.sh [--production|--staging] [--no-build] [--skip-backup] [--restore FILE] [--check]
 
 Recreates the complete website in place while preserving named data volumes.
 It supports both Docker Compose v2 (`docker compose`) and legacy v1
@@ -24,6 +25,7 @@ Options:
   --staging     Deploy docker-compose.staging.yml (serves port 3001)
   --no-build    Reuse existing images instead of rebuilding them
   --skip-backup Skip the pre-deploy mongodump (named volumes are still kept)
+  --restore FILE Restore this Mongo archive without the interactive menu
   --check       Validate configuration and prerequisites without changing Docker
   -h, --help    Show this help
 EOF
@@ -35,6 +37,7 @@ while (($#)); do
     --staging) PROFILE="staging" ;;
     --no-build) BUILD=0 ;;
     --skip-backup) BACKUP=0 ;;
+    --restore) shift; [[ $# -gt 0 ]] || { echo "--restore requires a file" >&2; exit 2; }; REQUESTED_RESTORE="$1" ;;
     --check) CHECK_ONLY=1 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -63,10 +66,12 @@ fi
 if [[ "$PROFILE" == "staging" ]]; then
   COMPOSE_FILE="$ROOT_DIR/docker-compose.staging.yml"
   ENV_FILE="$ROOT_DIR/.env.staging"
+  COMPOSE_PROJECT="ntueecoursewebsite2026-staging"
   URL="http://127.0.0.1:3001/"
 else
   COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
   ENV_FILE="$ROOT_DIR/.env"
+  COMPOSE_PROJECT="ntueecoursewebsite2026"
   URL="http://127.0.0.1:3000/"
 fi
 
@@ -74,22 +79,33 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
   echo "Missing compose file: $COMPOSE_FILE" >&2
   exit 1
 fi
-if [[ ! -f "$ROOT_DIR/.env" ]]; then
-  echo "Missing $ROOT_DIR/.env (required by the backend Dockerfile)." >&2
-  exit 1
-fi
-if [[ "$PROFILE" == "staging" && ! -f "$ENV_FILE" ]]; then
-  echo "Missing staging environment file: $ENV_FILE" >&2
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "Missing environment file: $ENV_FILE" >&2
+  [[ "$PROFILE" == "staging" ]] && echo "Create it with: cp .env.staging.example .env.staging" >&2
   exit 1
 fi
 
 cd "$ROOT_DIR"
-compose() { "${COMPOSE[@]}" -f "$COMPOSE_FILE" "$@"; }
+compose() { "${COMPOSE[@]}" --project-name "$COMPOSE_PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"; }
 
 echo "Profile: $PROFILE"
 echo "Compose: ${COMPOSE[*]}"
 echo "File:    $COMPOSE_FILE"
+echo "Project: $COMPOSE_PROJECT"
 compose config --quiet
+
+if [[ "$PROFILE" == "staging" ]]; then
+  rendered_config=$(compose config)
+  if grep -qE 'ntueecoursewebsite2021|course-mongo-data([^a-zA-Z-]|$)|0\.0\.0\.0:3000|published: "?3000' <<<"$rendered_config"; then
+    echo "Safety check failed: staging configuration references production resources." >&2
+    exit 1
+  fi
+elif (( ! CHECK_ONLY )) && docker ps --filter label=com.docker.compose.project=ntueecoursewebsite2021 \
+    --format '{{.ID}}' | grep -q .; then
+  echo "Refusing 2026 production deployment while the 2021 Compose project is running." >&2
+  echo "Use ./deploy.sh --staging to test without touching the existing website." >&2
+  exit 1
+fi
 
 if ((CHECK_ONLY)); then
   echo "Configuration is valid; no Docker state was changed."
@@ -98,13 +114,10 @@ fi
 
 backup_database() {
   local mongo_container db_name db_user db_password backup_dir backup_stamp backup_name
-  mongo_container="course-mongo"
-  if [[ "$PROFILE" == "staging" ]]; then
-    mongo_container="course-staging-mongo"
-  fi
+  mongo_container=$(compose ps -q course-mongodb)
 
-  if ! docker ps --format "{{.Names}}" | grep -Fxq "$mongo_container"; then
-    echo "No running $mongo_container container; skipping pre-deploy DB backup."
+  if [[ -z "$mongo_container" ]] || ! docker inspect "$mongo_container" >/dev/null 2>&1; then
+    echo "No running MongoDB container for $COMPOSE_PROJECT; skipping pre-deploy DB backup."
     return 0
   fi
 
@@ -180,6 +193,16 @@ choose_restore_source() {
   local path key selected=0 index
   local -a sources options
 
+  if [[ -n "$REQUESTED_RESTORE" ]]; then
+    RESTORE_SOURCE="$(realpath "$REQUESTED_RESTORE")"
+    [[ -f "$RESTORE_SOURCE" && "$RESTORE_SOURCE" == "$BACKUP_DIR"/* ]] || {
+      echo "Restore archive must be a file directly under $BACKUP_DIR." >&2; return 1;
+    }
+    RESTORE_MODE="archive"
+    echo "Selected DB archive: $RESTORE_SOURCE"
+    return 0
+  fi
+
   mkdir -p "$BACKUP_DIR"
   while IFS= read -r path; do
     [[ -n "$path" ]] || continue
@@ -229,7 +252,11 @@ choose_restore_source() {
 
 recover_database_if_needed() {
   local container db_name db_user db_password count inspect source_db attempt
-  container="course-mongo"; [[ "$PROFILE" == "staging" ]] && container="course-staging-mongo"
+  container=$(compose ps -q course-mongodb)
+  if [[ -z "$container" ]]; then
+    echo "Cannot find the MongoDB container for $COMPOSE_PROJECT." >&2
+    return 1
+  fi
   db_name=$(sed -n 's/^MONGO_DBNAME=//p' "$ENV_FILE" | head -n 1)
   db_user=$(sed -n 's/^MONGO_USERNAME=//p' "$ENV_FILE" | head -n 1)
   db_password=$(sed -n 's/^MONGO_PASSWORD=//p' "$ENV_FILE" | head -n 1)
@@ -302,6 +329,9 @@ echo "Building and starting the complete $PROFILE website..."
 compose "${UP_ARGS[@]}"
 
 recover_database_if_needed
+
+echo "Applying idempotent 2021-to-2026 schema migration..."
+compose run --rm course-backend npm run migrate:2021-to-2026
 
 echo "Waiting for $URL ..."
 for attempt in $(seq 1 90); do

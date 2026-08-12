@@ -1,7 +1,5 @@
 # This file is used for production, not for development!
 
-version: "3.4"
-
 services:
   nginx:
     container_name: course-nginx
@@ -9,7 +7,7 @@ services:
       context: ./prod-support/nginx
       dockerfile: ./Dockerfile
     ports:
-      - "3000:80"
+      - "127.0.0.1:3000:80"
     networks:
       - course
       - nginx
@@ -20,8 +18,8 @@ services:
     links:
       - course-frontend
       - course-backend
+    restart: unless-stopped
   course-frontend:
-    container_name: course-frontend
     build:
       context: .
       dockerfile: ./prod-support/frontend/Dockerfile
@@ -35,8 +33,8 @@ services:
       - REACT_APP_API_HOST=course-backend
     links:
       - course-backend
+    restart: unless-stopped
   course-backend:
-    container_name: course-backend
     build:
       context: .
       dockerfile: ./prod-support/backend/Dockerfile
@@ -59,10 +57,10 @@ services:
       - course-distribute-server
     volumes:
       - course-db-backups:/app/tmp/db-backups
+    restart: unless-stopped
 
   course-mongodb:
-    container_name: course-mongo
-    image: mongo:5.0.2
+    image: mongo:8.0.4
     environment:
       - MONGO_INITDB_ROOT_USERNAME=${MONGO_USERNAME}
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
@@ -72,17 +70,17 @@ services:
       - course
     volumes:
       - course-mongo-data:/data/db
+    restart: unless-stopped
 
   course-redisdb:
-    container_name: course-redis
-    image: redis
+    image: redis:7-alpine
     expose:
       - "6379"
     networks:
       - course
+    restart: unless-stopped
 
   course-distribute-server:
-    container_name: course-distribute
     build:
       context: .
       dockerfile: ./prod-support/distribute-server/Dockerfile
@@ -98,6 +96,8 @@ services:
       - MONGO_DBNAME=${MONGO_DBNAME}
       - MONGO_USERNAME=${MONGO_USERNAME}
       - MONGO_PASSWORD=${MONGO_PASSWORD}
+      - MONGO_AUTH_SOURCE=admin
+    restart: unless-stopped
 
 networks:
   nginx:
