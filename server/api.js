@@ -18,6 +18,9 @@ const model = require("./database/mongo/model");
 const { requestedStudentFields, serializeStudents } = require("./database/publicStudents");
 const mailRouter = require("./mail/routes");
 const digitalLabRouter = require("./digitalLab/routes");
+const backupService = require("./backup/service");
+const createBackupRouter = require("./backup/routes");
+const runDistribution = require("./distribution/run");
 
 // ========================================
 
@@ -120,6 +123,13 @@ router.use(session(sessionOptions));
 
 router.use(mailRouter);
 router.use(digitalLabRouter);
+router.use(
+  createBackupRouter({
+    connection: model.conn,
+    adminRequired: permissionRequired(constants.AUTHORITY_ADMIN),
+    service: backupService,
+  })
+);
 
 // ========================================
 
@@ -867,14 +877,16 @@ router.post(
   "/distribute",
   permissionRequired(constants.AUTHORITY_ADMIN),
   asyncHandler(async (req, res, next) => {
-    const resp = await fetch(
-      `http://${DISTRIBUTE_SERVER_HOST}:${DISTRIBUTE_SERVER_PORT}/distribute`,
-      { method: "POST" }
-    );
+    const { backup, response: resp } = await runDistribution({
+      connection: model.conn,
+      backupService,
+      fetchImpl: fetch,
+      url: `http://${DISTRIBUTE_SERVER_HOST}:${DISTRIBUTE_SERVER_PORT}/distribute`,
+    });
     if (resp.ok) {
-      res.status(200).end();
+      res.status(200).send({ backup });
     } else {
-      res.status(400).end();
+      res.status(400).send({ error: "Distribution failed after backup creation.", backup });
     }
   })
 );
@@ -884,18 +896,17 @@ router.post(
   express.json({ strict: false }),
   permissionRequired(constants.AUTHORITY_ADMIN),
   asyncHandler(async (req, res, next) => {
-    const resp = await fetch(
-      `http://${DISTRIBUTE_SERVER_HOST}:${DISTRIBUTE_SERVER_PORT}/new_distribute`,
-      {
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-        body: JSON.stringify(req.body),
-      }
-    );
+    const { backup, response: resp } = await runDistribution({
+      connection: model.conn,
+      backupService,
+      fetchImpl: fetch,
+      url: `http://${DISTRIBUTE_SERVER_HOST}:${DISTRIBUTE_SERVER_PORT}/new_distribute`,
+      body: req.body,
+    });
     if (resp.ok) {
-      res.status(200).end();
+      res.status(200).send({ backup });
     } else {
-      res.status(400).end();
+      res.status(400).send({ error: "Distribution failed after backup creation.", backup });
     }
   })
 );

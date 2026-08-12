@@ -31,13 +31,12 @@ $ ./deploy.sh --production
 
 `deploy.sh` 會自動相容 `docker compose` 與舊版 `docker-compose`，依序備份目前非空的 MongoDB、停止舊容器、重建服務、恢復所選資料，最後檢查前端及 API。Docker named volume 會保留，不會因部署而清空。
 
-部署前的 DB archive 預設存放於 repo 同層的 `NTUEECourseWebsite2026-deploy-backups/`。互動選單使用方向鍵選擇、Enter 確認：
+部署前的 DB archive 固定存放於 repo 同層的 `NTUEECourseWebsite2026-deploy-backups/`。互動選單使用方向鍵選擇、Enter 確認，且只會列出此資料夾第一層的 `.gz`：
 
 - `Keep existing Docker volume data`：沿用目前 DB，不從外部備份恢復。
-- `Backup file: *.gz`：直接恢復選定的 MongoDB archive。
-- `MongoDB dump folder`：直接以 `mongorestore --dir` 恢復選定目錄；目錄內須為標準 `mongodump --out` 產生的 DB／BSON 結構。
+- `*.gz`：直接恢復選定的 MongoDB archive。
 
-裝有多個 `.archive.gz` 的資料夾不是 MongoDB dump folder；此時應直接選擇其中的 `.gz` 檔案。請勿使用 `docker compose down --volumes` 或 `docker-compose down -v`，否則會刪除 DB volume。
+請勿使用 `docker compose down --volumes` 或 `docker-compose down -v`，否則會刪除 DB volume。
 
 只檢查設定而不變更 Docker：
 

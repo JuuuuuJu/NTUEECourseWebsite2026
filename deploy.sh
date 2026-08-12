@@ -9,7 +9,7 @@ BACKUP=1
 DB_RECOVERY_STATUS="not checked"
 RESTORE_MODE="keep"
 RESTORE_SOURCE=""
-RESTORE_SOURCE_KIND=""
+BACKUP_DIR="$(dirname "$ROOT_DIR")/NTUEECourseWebsite2026-deploy-backups"
 
 usage() {
   cat <<'EOF'
@@ -142,7 +142,7 @@ backup_database() {
     return 0
   fi
 
-  backup_dir="${DEPLOY_BACKUP_DIR:-$(dirname "$ROOT_DIR")/NTUEECourseWebsite2026-deploy-backups}"
+  backup_dir="$BACKUP_DIR"
   mkdir -p "$backup_dir"
   backup_stamp=$(date +%Y%m%d-%H%M%S)
   backup_name="${PROFILE}-${db_name}-predeploy-${backup_stamp}.archive.gz"
@@ -177,28 +177,19 @@ database_document_count() {
 }
 
 choose_restore_source() {
-  local parent_dir entry kind path key selected=0 index
-  local -a sources kinds options
-  parent_dir=$(dirname "$ROOT_DIR")
+  local path key selected=0 index
+  local -a sources options
 
-  while IFS= read -r entry; do
-    kind=${entry%% *}
-    path=${entry#* }
-    [[ -n "$path" && "$path" != "$ROOT_DIR" ]] || continue
+  mkdir -p "$BACKUP_DIR"
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
     sources+=("$path")
-    if [[ "$kind" == "f" ]]; then
-      kinds+=("file")
-      options+=("Backup file: $path")
-    else
-      kinds+=("folder")
-      options+=("MongoDB dump folder: $path")
-    fi
+    options+=("$(basename "$path")")
   done < <(
-    find "$parent_dir" -mindepth 1 -maxdepth 1 \( -type d -o -type f -name '*.gz' \) -printf '%y %p\n' 2>/dev/null | sort -k2
+    find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.gz' -printf '%T@ %p\n' 2>/dev/null | sort -nr | cut -d' ' -f2-
   )
 
   sources=("" "${sources[@]}")
-  kinds=("keep" "${kinds[@]}")
   options=("Keep existing Docker volume data (do not restore)" "${options[@]}")
 
   if [[ ! -t 0 || ! -t 1 ]]; then
@@ -211,13 +202,9 @@ choose_restore_source() {
   trap 'printf "\033[?25h\033[?1049l"; exit 130' INT TERM
   while true; do
     printf '\033[H\033[2J'
-    echo "Choose a backup file or folder from $parent_dir (Up/Down, Enter):"
+    echo "Choose a DB archive from $BACKUP_DIR (Up/Down, Enter):"
     for index in "${!options[@]}"; do
-      if ((index == selected)); then
-        printf '  \033[7m> %s\033[0m\n' "${options[$index]}"
-      else
-        printf '    %s\n' "${options[$index]}"
-      fi
+      if ((index == selected)); then printf '  \033[7m> %s\033[0m\n' "${options[$index]}"; else printf '    %s\n' "${options[$index]}"; fi
     done
     IFS= read -rsn1 key
     if [[ "$key" == $'\e' ]]; then IFS= read -rsn2 key || true; fi
@@ -230,20 +217,18 @@ choose_restore_source() {
   printf '\033[?25h\033[?1049l'
   trap - INT TERM
 
-  RESTORE_SOURCE_KIND="${kinds[$selected]}"
   RESTORE_SOURCE="${sources[$selected]}"
-  if [[ "$RESTORE_SOURCE_KIND" == "keep" ]]; then
+  if ((selected == 0)); then
     RESTORE_MODE="keep"
     echo "Selected: keep existing Docker volume data."
   else
-    RESTORE_MODE="source"
-    echo "Selected backup $RESTORE_SOURCE_KIND: $RESTORE_SOURCE"
+    RESTORE_MODE="archive"
+    echo "Selected DB archive: $RESTORE_SOURCE"
   fi
 }
 
 recover_database_if_needed() {
   local container db_name db_user db_password count inspect source_db attempt
-  local -a format_args
   container="course-mongo"; [[ "$PROFILE" == "staging" ]] && container="course-staging-mongo"
   db_name=$(sed -n 's/^MONGO_DBNAME=//p' "$ENV_FILE" | head -n 1)
   db_user=$(sed -n 's/^MONGO_USERNAME=//p' "$ENV_FILE" | head -n 1)
@@ -261,41 +246,24 @@ recover_database_if_needed() {
     return 0
   fi
 
-  if [[ "$RESTORE_SOURCE_KIND" == "file" ]]; then
-    echo "Restoring selected archive file directly: $RESTORE_SOURCE"
-    docker cp "$RESTORE_SOURCE" "$container:/tmp/deploy-restore.archive.gz" >/dev/null
-    inspect=$(docker exec "$container" mongorestore --archive=/tmp/deploy-restore.archive.gz --gzip --dryRun --verbose 2>&1 || true)
-    source_db=$(printf '%s\n' "$inspect" | sed -n 's/.*archive prelude \([^.]*\)\..*/\1/p' | head -n 1)
-    if [[ -z "$source_db" ]]; then
-      docker exec "$container" rm -f /tmp/deploy-restore.archive.gz
-      DB_RECOVERY_STATUS="selected file is not a usable MongoDB gzip archive: $RESTORE_SOURCE"
-      echo "DB recovery: $DB_RECOVERY_STATUS."
-      return 0
-    fi
-    docker exec "$container" mongorestore --quiet --username "$db_user" --password "$db_password" --authenticationDatabase admin --archive=/tmp/deploy-restore.archive.gz --gzip --drop --nsFrom="$source_db.*" --nsTo="$db_name.*"
+  echo "Restoring selected archive: $RESTORE_SOURCE"
+  docker cp "$RESTORE_SOURCE" "$container:/tmp/deploy-restore.archive.gz" >/dev/null
+  inspect=$(docker exec "$container" mongorestore --archive=/tmp/deploy-restore.archive.gz --gzip --dryRun --verbose 2>&1 || true)
+  source_db=$(printf '%s\n' "$inspect" | sed -n 's/.*archive prelude \([^.]*\)\..*/\1/p' | head -n 1)
+  if [[ -z "$source_db" ]]; then
     docker exec "$container" rm -f /tmp/deploy-restore.archive.gz
-  else
-    echo "Restoring selected MongoDB dump folder directly: $RESTORE_SOURCE"
-    docker exec "$container" sh -eu -c 'rm -rf /tmp/deploy-restore-dir; mkdir -p /tmp/deploy-restore-dir'
-    docker cp "$RESTORE_SOURCE/." "$container:/tmp/deploy-restore-dir/" >/dev/null
-    if find "$RESTORE_SOURCE" -type f -name '*.bson.gz' -print -quit 2>/dev/null | grep -q .; then format_args+=(--gzip); fi
-    inspect=$(docker exec "$container" mongorestore --dir=/tmp/deploy-restore-dir "${format_args[@]}" --dryRun --verbose 2>&1 || true)
-    source_db=$(printf '%s\n' "$inspect" | sed -n 's/.*found collection \([^. ]*\)\..*/\1/p' | head -n 1)
-    if [[ -z "$source_db" ]]; then
-      docker exec "$container" rm -rf /tmp/deploy-restore-dir
-      DB_RECOVERY_STATUS="selected folder is not a usable MongoDB dump directory: $RESTORE_SOURCE"
-      echo "DB recovery: $DB_RECOVERY_STATUS."
-      return 0
-    fi
-    docker exec "$container" mongorestore --quiet --username "$db_user" --password "$db_password" --authenticationDatabase admin --dir=/tmp/deploy-restore-dir "${format_args[@]}" --drop --nsFrom="$source_db.*" --nsTo="$db_name.*"
-    docker exec "$container" rm -rf /tmp/deploy-restore-dir
+    DB_RECOVERY_STATUS="selected file is not a usable MongoDB gzip archive: $RESTORE_SOURCE"
+    echo "DB recovery: $DB_RECOVERY_STATUS."
+    return 0
   fi
 
+  docker exec "$container" mongorestore --quiet --username "$db_user" --password "$db_password" --authenticationDatabase admin --archive=/tmp/deploy-restore.archive.gz --gzip --drop --nsFrom="$source_db.*" --nsTo="$db_name.*"
+  docker exec "$container" rm -f /tmp/deploy-restore.archive.gz
   count=$(database_document_count "$container" "$db_name" "$db_user" "$db_password")
   if [[ "$count" != "0" ]]; then
-    DB_RECOVERY_STATUS="restored $count documents directly from selected $RESTORE_SOURCE_KIND: $RESTORE_SOURCE"
+    DB_RECOVERY_STATUS="restored $count documents from $RESTORE_SOURCE"
   else
-    DB_RECOVERY_STATUS="restore completed from selected $RESTORE_SOURCE_KIND, but the target DB contains no documents"
+    DB_RECOVERY_STATUS="restore completed, but the target DB contains no documents: $RESTORE_SOURCE"
   fi
   echo "DB recovery: $DB_RECOVERY_STATUS."
 }
