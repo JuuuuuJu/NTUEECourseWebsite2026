@@ -90,7 +90,7 @@ function EnhancedTableHead(props) {
         </TableCell>
         {headCells.map((headCell) => (
           <TableCell
-            className={(classes.headCell, classes.grade)}
+            className={clsx(classes.headCell, classes.grade)}
             key={headCell.id}
             align={headCell.numeric ? "right" : "left"}
             padding={headCell.disablePadding ? "none" : "default"}
@@ -111,7 +111,7 @@ function EnhancedTableHead(props) {
             </TableSortLabel>
           </TableCell>
         ))}
-        <TableCell className={classes.headCell} />
+        <TableCell className={classes.headCell} aria-label="actions" />
       </TableRow>
     </TableHead>
   );
@@ -131,6 +131,14 @@ const useToolbarStyles = makeStyles((theme) => ({
   root: {
     paddingLeft: theme.spacing(2),
     paddingRight: theme.spacing(1),
+    gap: theme.spacing(1),
+    [theme.breakpoints.down("phone")]: {
+      flexWrap: "wrap",
+      padding: theme.spacing(1),
+      "& .MuiInput-root": {
+        width: "100%",
+      },
+    },
   },
   highlight:
     theme.palette.type === "light"
@@ -166,12 +174,13 @@ const EnhancedTableToolbar = (props) => {
 
   return (
     <Toolbar
-      className={
-        (clsx(classes.root, {
+      className={clsx(
+        classes.root,
+        {
           [classes.highlight]: numSelected > 0,
-        }),
-        rootClasses.toolbar)
-      }
+        },
+        rootClasses.toolbar
+      )}
     >
       {numSelected > 0 ? (
         <Typography
@@ -231,20 +240,40 @@ EnhancedTableToolbar.propTypes = {
 const useStyles = makeStyles((theme) => ({
   root: {
     width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
   },
   paper: {
     width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
     marginBottom: theme.spacing(2),
   },
   container: {
+    display: "block",
+    width: "100%",
     maxHeight: 440,
+    maxWidth: "100%",
+    overflowX: "scroll",
+    WebkitOverflowScrolling: "touch",
+    touchAction: "pan-x pan-y",
+    overscrollBehaviorX: "contain",
+    [theme.breakpoints.down("phone")]: {
+      maxWidth: "calc(100vw - 24px)",
+    },
   },
   toolbar: {
     minHeight: "50px",
   },
   table: {
-    minWidth: 500,
+    minWidth: 680,
     padding: 0,
+    "& .MuiTableCell-root": { whiteSpace: "nowrap" },
+    [theme.breakpoints.down("phone")]: {
+      "& .MuiTableCell-root": {
+        padding: theme.spacing(1),
+      },
+    },
   },
   sortlabel: {
     margin: 0,
@@ -276,6 +305,10 @@ const useStyles = makeStyles((theme) => ({
     backgroundColor: "#424242",
     color: "#ffffff",
     boxShadow: "0px 0px 0px 0px rgba(0,0,0,0.3)",
+  },
+  pagination: {
+    overflowX: "auto",
+    "& .MuiTablePagination-toolbar": { minWidth: 420 },
   },
 }));
 
@@ -496,6 +529,7 @@ export default function StudentTable({
                       </TableCell>
                       <TableCell className={classes.tablecell}>
                         <IconButton
+                          aria-label={`edit ${row.id}`}
                           onClick={() => handleEdit(row.id)}
                           className={classes.icon}
                           disabled={selected.length !== 0 || authority !== 2}
@@ -503,6 +537,7 @@ export default function StudentTable({
                           <EditIcon />
                         </IconButton>
                         <IconButton
+                          aria-label={`delete ${row.id}`}
                           onClick={() => handleDelete([row.id])}
                           className={classes.icon}
                           disabled={selected.length !== 0 || authority !== 2}
@@ -517,6 +552,7 @@ export default function StudentTable({
           </Table>
         </TableContainer>
         <TablePagination
+          className={classes.pagination}
           rowsPerPageOptions={[50, 100, 200, 400]}
           component="div"
           count={data.filter((e) => studentFilter(e)).length}

@@ -131,7 +131,7 @@ export default function Courses() {
                     (!c.students.length || c.students.includes(userID))
                 )
                 .map(({ id, name }) => (
-                  <Grid item xs={6} sm={4} md={3} key={id}>
+                  <Grid item xs={12} sm={6} md={4} lg={3} key={id}>
                     <Course
                       id={id}
                       name={name}

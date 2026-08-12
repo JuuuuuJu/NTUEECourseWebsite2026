@@ -34,10 +34,23 @@ const theme = createMuiTheme({
   overrides: {
     MuiCssBaseline: {
       "@global": {
+        "html, body, #root": {
+          width: "100%",
+          minHeight: "100%",
+          overflowX: "hidden",
+        },
+        "*, *::before, *::after": {
+          boxSizing: "border-box",
+        },
         body: {
+          margin: 0,
           background: "linear-gradient(170deg, #192231 70%, #B6A19E 10%)",
           backgroundRepeat: "no-repeat",
           backgroundAttachment: "fixed",
+        },
+        img: {
+          maxWidth: "100%",
+          height: "auto",
         },
       },
     },

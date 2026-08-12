@@ -48,10 +48,14 @@ const useStyles = makeStyles(() => ({
   root: {
     display: "flex",
     flexWrap: "wrap",
+    width: "100%",
     maxWidth: "1000px",
+    minWidth: 0,
     padding: "0px",
     "& > *": {
       margin: "auto",
+      minWidth: 0,
+      maxWidth: "100%",
     },
   },
   input: {
@@ -974,7 +978,7 @@ export default function StudentData() {
         alignItems="flex-start"
         direction="row"
       >
-        <Grid item sm={12}>
+        <Grid item xs={12} sm={12}>
           <Grid
             container
             spacing={1}
@@ -1024,7 +1028,7 @@ export default function StudentData() {
             </Grid>
           </Grid>
         </Grid>
-        <Grid item sm={12}>
+        <Grid item xs={12} sm={12}>
           <StudentTable
             data={data}
             handleEdit={handleOpenEdit}

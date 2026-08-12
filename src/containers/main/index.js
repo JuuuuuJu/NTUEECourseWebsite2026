@@ -9,7 +9,7 @@ export default function Main() {
     <div>
       <Top />
       <Explanation />
-      <div style={{ height: "100px" }} />
+      <div style={{ height: "clamp(40px, 8vw, 100px)" }} />
       <Usage />
       <Footer />
     </div>

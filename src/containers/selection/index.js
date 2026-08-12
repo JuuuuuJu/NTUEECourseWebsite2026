@@ -44,6 +44,11 @@ const useStyles = makeStyles((theme) => ({
       paddingLeft: "0px",
       paddingRight: "0px",
     },
+    [theme.breakpoints.down("phone")]: {
+      gridTemplateColumns: "minmax(0, 1fr)",
+      height: "auto",
+      minHeight: "80vh",
+    },
   },
   link: {
     display: "flex",

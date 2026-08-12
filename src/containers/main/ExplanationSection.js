@@ -25,7 +25,7 @@ import Card5 from "./Cards/Card5";
 import Card6 from "./Cards/Card6";
 import CardMarkdown from "./Cards/CardMarkdown";
 
-const useStyles = makeStyles(() => ({
+const useStyles = makeStyles((theme) => ({
   root: {
     width: "80%",
     margin: "auto",
@@ -39,6 +39,11 @@ const useStyles = makeStyles(() => ({
     flexGrow: 1,
     padding: "20px",
     paddingBottom: "40px",
+    [theme.breakpoints.down("sm")]: {
+      width: "95%",
+      padding: theme.spacing(2, 1),
+      paddingBottom: theme.spacing(3),
+    },
   },
   title: {
     padding: "10px",
@@ -60,7 +65,7 @@ const StyledCarouselProvider = styled(CarouselProvider)`
   border: solid;
   /* margin-top: 3%; */
   padding: 2%;
-  @media screen and (max-width: 480px) {
+  @media screen and (max-width: 700px) {
     width: 100%;
     padding: 3%;
     margin: 0;
@@ -125,7 +130,7 @@ const message6 = `1. 每個人的起始優先度是 0
 
 export default function Explanation() {
   const classes = useStyles();
-  const isMobile = useMediaQuery({ query: "(max-width: 480px,)" }); //只是控制頁數和上面的選擇器無關
+  const isMobile = useMediaQuery({ query: "(max-width: 700px)" }); //只是控制頁數和上面的選擇器無關
 
   return (
     <Element name="explanation">

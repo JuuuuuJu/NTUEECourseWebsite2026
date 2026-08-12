@@ -47,6 +47,9 @@ const useStyles = makeStyles((theme) => ({
     marginTop: theme.spacing(3),
     padding: theme.spacing(4),
     backgroundColor: "rgba(0, 0, 0, 0)",
+    [theme.breakpoints.down("phone")]: {
+      padding: theme.spacing(1, 0),
+    },
   },
   paper: {
     marginTop: theme.spacing(8),
@@ -56,20 +59,36 @@ const useStyles = makeStyles((theme) => ({
     alignItems: "center",
     backgroundColor: "rgba(0, 0, 0, .7)",
     borderRadius: "3%",
+    [theme.breakpoints.down("phone")]: {
+      marginTop: theme.spacing(3),
+      padding: theme.spacing(2, 1),
+      alignItems: "stretch",
+    },
   },
   stepButton: {
     padding: "10px",
     marginLeft: "-10px",
     borderRadius: "50%",
     border: "1px solid",
+    flexShrink: 0,
   },
   button: {
     marginRight: theme.spacing(1),
+    [theme.breakpoints.down("phone")]: {
+      width: "100%",
+      margin: 0,
+      whiteSpace: "normal",
+      lineHeight: 1.25,
+    },
   },
   resetButton: {
     marginRight: theme.spacing(1),
     backgroundColor: "rgba(255, 0, 0, .7)",
-    color: "white"
+    color: "white",
+    [theme.breakpoints.down("phone")]: {
+      width: "100%",
+      margin: theme.spacing(1, 0, 0),
+    },
   },
   input: {
     display: "none",
@@ -80,6 +99,25 @@ const useStyles = makeStyles((theme) => ({
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-end",
+    gap: theme.spacing(1),
+    flexWrap: "wrap",
+    [theme.breakpoints.down("phone")]: {
+      width: "100%",
+      alignItems: "stretch",
+      "& .MuiButton-root": {
+        width: "100%",
+        margin: 0,
+        whiteSpace: "normal",
+        lineHeight: 1.25,
+      },
+    },
+  },
+  stepLabel: {
+    overflowWrap: "anywhere",
+    [theme.breakpoints.down("phone")]: {
+      fontSize: "1.15rem",
+      lineHeight: 1.25,
+    },
   },
   active: {
     borderRadius: "50%",
@@ -407,7 +445,7 @@ export default function Distribute() {
                 }
                 onClick={() => setActiveStep(0)}
               >
-                <Typography component="h3" variant="h5">
+                <Typography component="h3" variant="h5" className={classes.stepLabel}>
                   1. Upload Preselect
                 </Typography>
               </StepButton>
@@ -500,7 +538,7 @@ export default function Distribute() {
                 }
                 onClick={() => setActiveStep(0)}
               >
-                <Typography component="h3" variant="h5">
+                <Typography component="h3" variant="h5" className={classes.stepLabel}>
                   1. Run Distribution
                 </Typography>
               </StepButton>
@@ -587,7 +625,7 @@ export default function Distribute() {
                 }
                 onClick={() => setActiveStep(1)}
               >
-                <Typography component="h3" variant="h5">
+                <Typography component="h3" variant="h5" className={classes.stepLabel}>
                   2. Download Results
                 </Typography>
               </StepButton>

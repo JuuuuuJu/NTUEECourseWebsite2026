@@ -15,6 +15,7 @@ import {
   ListItem,
   ListItemText,
   ListItemIcon,
+  useMediaQuery,
 } from "@material-ui/core/";
 import MenuIcon from "@material-ui/icons/Menu";
 import IconButton from "@material-ui/core/IconButton";
@@ -37,8 +38,6 @@ import { selectSession, logout } from "../../slices/sessionSlice";
 // route
 
 const drawerWidth = 200;
-const maxPhoneWidth = 700;
-
 const useStyles = makeStyles((theme) => ({
   drawer: {
     width: drawerWidth,
@@ -76,8 +75,8 @@ const useStyles = makeStyles((theme) => ({
     flexGrow: 1,
   },
   drawerOpen: {
+    width: drawerWidth,
     [theme.breakpoints.up("phone")]: {
-      width: drawerWidth,
       transition: theme.transitions.create("width", {
         easing: theme.transitions.easing.sharp,
         duration: theme.transitions.duration.enteringScreen,
@@ -114,6 +113,11 @@ const useStyles = makeStyles((theme) => ({
   content: {
     flexGrow: 1,
     padding: theme.spacing(3),
+    width: "100%",
+    minWidth: 0,
+    [theme.breakpoints.down("phone")]: {
+      padding: theme.spacing(2, 1.5),
+    },
     [theme.breakpoints.up("phone")]: {
       transition: theme.transitions.create("margin", {
         easing: theme.transitions.easing.sharp,
@@ -139,6 +143,7 @@ const Drawer = ({ children }) => {
   const history = useHistory();
   const classes = useStyles();
   const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("phone"));
   const [open, setOpen] = useState(false);
   const dispatch = useDispatch();
 
@@ -238,7 +243,7 @@ const Drawer = ({ children }) => {
             onClick={handleDrawerClose}
             edge="start"
             className={clsx(classes.menuButton, {
-              [classes.hide]: !open || window.innerWidth >= maxPhoneWidth,
+              [classes.hide]: !open || !isMobile,
             })}
           >
             <KeyboardArrowUpIcon />
@@ -278,8 +283,11 @@ const Drawer = ({ children }) => {
         </Toolbar>
       </AppBar>
       <MUIDrawer
-        anchor={window.innerWidth >= maxPhoneWidth ? "left" : "top"}
-        variant="permanent"
+        anchor="left"
+        variant={isMobile ? "temporary" : "permanent"}
+        open={open}
+        onClose={handleDrawerClose}
+        ModalProps={{ keepMounted: true }}
         className={clsx(classes.drawer, {
           [classes.drawerOpen]: open,
           [classes.drawerClose]: !open,

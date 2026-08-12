@@ -46,6 +46,15 @@ const useStyles = makeStyles((theme) => ({
   },
   optionsAdd: {
     margin: `${theme.spacing(1)}px 0 0 0`
+  },
+  pageActions: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: theme.spacing(1),
+    "& .MuiButton-root": { margin: 0 },
+    [theme.breakpoints.down("phone")]: {
+      "& .MuiButton-root": { width: "100%" }
+    }
   }
 }));
 
@@ -706,14 +715,14 @@ export default function CourseManage() {
   return (
     <div>
       <Grid container spacing={3} direction="row">
-        <Grid item sm={12}>
+        <Grid item xs={12} className={classes.pageActions}>
           <Button onClick={addCourse} variant="contained" color="primary">
             Add Course
           </Button>
-          <Button onClick={importCourses} variant="outlined" color="primary" style={{ marginLeft: "10px" }}>
+          <Button onClick={importCourses} variant="outlined" color="primary">
             Import Courses
           </Button>
-          <Button onClick={exportCourses} variant="outlined" color="primary" style={{ marginLeft: "10px" }}>
+          <Button onClick={exportCourses} variant="outlined" color="primary">
             Export Courses
           </Button>
 
@@ -726,7 +735,7 @@ export default function CourseManage() {
             Add single Preselect
           </Button> */}
         </Grid>
-        <Grid item sm={12}>
+        <Grid item xs={12}>
           <CourseTable
             courses={courses}
             typeData={typeData}

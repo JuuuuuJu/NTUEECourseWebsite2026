@@ -100,12 +100,28 @@ export default function Top() {
     };
   }, [end]);
 
-  const useStyles = makeStyles(() => ({
+  const useStyles = makeStyles((theme) => ({
     root: {
       flexGrow: 1,
       width: "100%",
-      height: "100vh",
-      overflow: "auto",
+      minHeight: "calc(100svh - 64px)",
+      overflow: "hidden",
+      display: "flex",
+      flexDirection: "column",
+    },
+    hero: {
+      padding: theme.spacing(1),
+      margin: "5vh auto 0",
+      width: "90%",
+      maxWidth: 500,
+      [theme.breakpoints.up("md")]: {
+        marginLeft: "30%",
+      },
+      [theme.breakpoints.down("phone")]: {
+        width: "100%",
+        marginTop: theme.spacing(2),
+        padding: 0,
+      },
     },
     paper: {
       background: "rgb(0,0,0,.0)",
@@ -115,6 +131,7 @@ export default function Top() {
       margin: "auto",
       textAlign: "start",
       width: "80%",
+      [theme.breakpoints.down("phone")]: { width: "100%" },
     },
     time: {
       margin: "auto",
@@ -122,6 +139,21 @@ export default function Top() {
       textAlign: "end",
       width: "70%",
       fontWeight: "400",
+      overflowWrap: "anywhere",
+      [theme.breakpoints.down("phone")]: {
+        width: "100%",
+        textAlign: "start",
+        fontSize: "1rem",
+      },
+    },
+    action: {
+      width: "70%",
+      display: "flex",
+      margin: "15% auto 3%",
+      [theme.breakpoints.down("phone")]: {
+        width: "100%",
+        marginTop: theme.spacing(4),
+      },
     },
   }));
 
@@ -139,16 +171,7 @@ export default function Top() {
         <Grid
           container
           direction="column"
-          style={{
-            // boxShadow: "0 0 15px #f3d42e inset",
-            padding: "10px",
-            margin: "auto",
-            marginTop: "5%",
-            marginLeft: "30%",
-            width: "90%",
-            maxWidth: "500px",
-            maxHeight: "500px",
-          }}
+          className={classes.hero}
         >
           <Paper className={classes.paper}>
             <Grid item style={{ marginTop: "15%", marginLeft: "5%" }}>
@@ -184,13 +207,7 @@ export default function Top() {
             </Grid>
             {!isLogin && (
               <Button
-                style={{
-                  width: "70%",
-                  display: "flex",
-                  margin: "auto",
-                  marginTop: "15%",
-                  marginBottom: "3%",
-                }}
+                className={classes.action}
                 variant="outlined"
                 color="primary"
                 onClick={() => history.push("/login")}
@@ -202,13 +219,7 @@ export default function Top() {
             )}
             {isLogin && (
               <Button
-                style={{
-                  width: "70%",
-                  display: "flex",
-                  margin: "auto",
-                  marginTop: "15%",
-                  marginBottom: "3%",
-                }}
+                className={classes.action}
                 variant="outlined"
                 color="primary"
                 onClick={() => history.push("/courses")}

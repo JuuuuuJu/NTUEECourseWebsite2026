@@ -17,6 +17,29 @@ import {
   Edit,
   Delete,
 } from "@material-ui/icons";
+import { makeStyles } from "@material-ui/core/styles";
+
+const useStyles = makeStyles((theme) => ({
+  container: {
+    width: "100%",
+    maxWidth: "100%",
+    overflowX: "auto",
+    WebkitOverflowScrolling: "touch",
+    touchAction: "pan-x pan-y",
+    overscrollBehaviorX: "contain",
+  },
+  table: {
+    minWidth: 760,
+    "& .MuiTableCell-root": {
+      whiteSpace: "nowrap",
+    },
+    [theme.breakpoints.down("phone")]: {
+      "& .MuiTableCell-root": {
+        padding: theme.spacing(1),
+      },
+    },
+  },
+}));
 
 export default function CourseTable({
   courses,
@@ -26,9 +49,10 @@ export default function CourseTable({
   editCourse,
   deleteCourse,
 }) {
+  const classes = useStyles();
   return (
-    <TableContainer component={Paper}>
-      <Table size="small">
+    <TableContainer component={Paper} className={classes.container}>
+      <Table size="small" className={classes.table}>
         <TableHead>
           <TableRow>
             <TableCell>Course ID</TableCell>

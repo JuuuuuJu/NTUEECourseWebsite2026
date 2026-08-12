@@ -14,7 +14,7 @@ import {
 } from "@material-ui/core";
 
 const classes = ["odd", "even"];
-const useStyles = makeStyles(() => ({
+const useStyles = makeStyles((theme) => ({
   odd: {
     backgroundColor: "rgba(178, 235, 242, 0.08)",
   },
@@ -22,10 +22,17 @@ const useStyles = makeStyles(() => ({
     // backgroundImage: "rgba(178, 235, 242, 0.08)",
   },
   table: {
-    minWidth: "500px",
+    width: "100%",
     margin: "auto",
     marginTop:"20px",
     backgroundColor: "rgba(0, 0, 0, 0.5)",
+    overflowX: "auto",
+    [theme.breakpoints.down("xs")]: {
+      "& .MuiTableCell-root": {
+        padding: theme.spacing(1),
+        overflowWrap: "anywhere",
+      },
+    },
   },
 }));
 
