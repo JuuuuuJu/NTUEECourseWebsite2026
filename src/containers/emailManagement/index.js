@@ -117,7 +117,6 @@ export default function EmailManagement() {
   const [recipientOverride, setRecipientOverride] = useState("");
   const [smtpUserid, setSmtpUserid] = useState("");
   const [smtpPassword, setSmtpPassword] = useState("");
-  const [dryRun, setDryRun] = useState(true);
   const [generatePasswords, setGeneratePasswords] = useState(false);
   const [updatePasswords, setUpdatePasswords] = useState(false);
   const [preview, setPreview] = useState(null);
@@ -215,18 +214,16 @@ export default function EmailManagement() {
     setConfirmOpen(false); setBusy(true);
     try {
       const response = await EmailAPI.sendEmail({
-        templateKey: key, sourceMode, grades: selectedGrades, csvRows, dryRun,
+        templateKey: key, sourceMode, grades: selectedGrades, csvRows,
         reminderCourseIDs,
         generatePasswords, updatePasswords, variables, recipientOverride,
         smtp: { userid: smtpUserid, password: smtpPassword },
         confirmedLargeSend: largeConfirmed,
       });
       setResult(response.data);
-      if (!dryRun) {
-        notify("success", "寄信工作已加入佇列，可離開此頁後再回來查看");
-        setSmtpPassword("");
-        await loadJobs();
-      } else notify("success", "Dry-run 完成：未寄信、未更新密碼、未使用額度");
+      notify("success", "寄信工作已加入佇列，可離開此頁後再回來查看");
+      setSmtpPassword("");
+      await loadJobs();
     } catch (error) {
       setResult(error.response?.data || null);
       notify("error", errorMessage(error));
@@ -237,8 +234,8 @@ export default function EmailManagement() {
     if (!recipientCount) return notify("error", "目前沒有收件人");
     if (sourceMode === "database" && !selectedGrades.length) return notify("error", "請選擇至少一個年級");
     if (purpose === "reminder" && !reminderCourseIDs.length) return notify("error", "未選通知請選擇至少一門課程");
-    if (!dryRun && (!smtpUserid.trim() || !smtpPassword)) return notify("error", "請輸入 SMTP userid 與 password");
-    if (dryRun) send(); else setConfirmOpen(true);
+    if (!smtpUserid.trim() || !smtpPassword) return notify("error", "請輸入 SMTP userid 與 password");
+    setConfirmOpen(true);
   };
 
   const acknowledge = async (id) => {
@@ -292,7 +289,11 @@ export default function EmailManagement() {
           <Typography>{job.recipientSource?.summary}{job.recipientSource?.override ? `；⚠ 全部實際寄至 ${job.recipientSource.override}` : ""}</Typography>
           <LinearProgress className={classes.progress} variant="determinate" value={percent} />
           <Typography>已寄 {job.sent} / 失敗 {job.failed} / 略過 {job.skipped} / 已停止 {job.canceled || 0} / 剩餘 {job.remaining} / 總計 {job.total}</Typography>
-          <Typography>滾動 60 分鐘硬上限：{job.hourlyLimit} 封；下次寄送：{fmt(job.nextRunAt)}</Typography>
+          <Typography>
+            {job.hourlyLimit == null
+              ? "寄送限速：未套用"
+              : `帳密通知限速：每 ${job.batchSize} 封間隔 ${job.batchIntervalSeconds} 秒；10 分鐘最多 ${job.tenMinuteLimit} 封；60 分鐘最多 ${job.hourlyLimit} 封；下次寄送：${fmt(job.nextRunAt)}`}
+          </Typography>
           <Typography color="textSecondary">建立 {fmt(job.createdAt)}　更新 {fmt(job.updatedAt)}　完成 {fmt(job.completedAt)}</Typography>
           {["queued", "sending", "rate-limited"].includes(job.status) && <Button disabled={busy} color="secondary" variant="contained" onClick={() => cancelJob(job.id)}>停止寄信</Button>}
           {job.failed > 0 && ["completed", "failed", "canceled"].includes(job.status) && <Button disabled={busy} color="secondary" variant="contained" onClick={() => retryFailed(job.id)}>所有失敗收件人一鍵重寄（{job.failed}）</Button>}
@@ -334,7 +335,7 @@ export default function EmailManagement() {
       <Grid item xs={12}><TextField fullWidth label="主旨" value={template.subject || ""} onChange={(e) => setTemplate({ ...template, subject: e.target.value })} /></Grid>
       <Grid item xs={12}><TextField fullWidth label="寄件者名稱" value={template.senderName || ""} onChange={(e) => setTemplate({ ...template, senderName: e.target.value })} /></Grid>
       <Grid item xs={12}><TextField fullWidth multiline rows={10} variant="outlined" className={classes.editor} label="信件內容（HTML）" value={template.body || ""} onChange={(e) => setTemplate({ ...template, body: e.target.value })} /></Grid>
-      {["schedule", "reminder"].includes(purpose) && <Grid item xs={12}><Alert severity="info">時程通知與未選通知固定以單封 BCC 寄送。所有收件人的主旨與內容必須完全相同；請勿使用姓名、帳號、Email 等會因收件人而改變的欄位，系統也會在建立工作前逐一比對並阻擋不一致內容。</Alert></Grid>}
+      {["schedule", "reminder", "result"].includes(purpose) && <Grid item xs={12}><Alert severity="info">時程通知、未選通知與結果通知固定以單封 BCC 寄送，不受帳密通知限速影響。所有收件人的主旨與內容必須完全相同；請勿使用姓名、帳號、Email 等會因收件人而改變的欄位，系統也會在建立工作前逐一比對並阻擋不一致內容。</Alert></Grid>}
       <Grid item xs={12}><div className={classes.variables}>{[...new Set([...builtIns, ...csvHeaders])].map((v) => <Chip key={v} label={`{{${v}}}`} />)}</div></Grid>
       {Object.keys(initialVariables).map((v) => <Grid item xs={12} sm={6} key={v}><TextField fullWidth label={v} value={variables[v]} onChange={(e) => setVariables({ ...variables, [v]: e.target.value })} /></Grid>)}
       <Grid item><Button color="primary" variant="contained" disabled={busy} onClick={saveTemplate}>儲存模板</Button></Grid>
@@ -372,41 +373,35 @@ export default function EmailManagement() {
     <Paper className={`${classes.section} ${classes.override}`}><Typography variant="h6">⚠ 收件人覆寫（僅 staging / 測試）</Typography><Typography>填入後，所有信件都會實際寄到此地址；原始收件人仍顯示於報告。</Typography><TextField fullWidth label="Override email（留白為關閉）" value={recipientOverride} onChange={(e) => setRecipientOverride(e.target.value)} /></Paper>
 
     <Paper className={classes.section}><Typography variant="h6">寄送設定</Typography>
-      <RadioGroup row value={dryRun ? "dry-run" : "real"} onChange={(event) => setDryRun(event.target.value === "dry-run")}>
-        <FormControlLabel value="dry-run" control={<Radio color="primary" />} label="Dry-run（只驗證，不寄信）" />
-        <FormControlLabel value="real" control={<Radio color="secondary" />} label="真實寄信" />
-      </RadioGroup>
-      {!dryRun && (
-        <Grid container spacing={2}>
-          <Grid item xs={12}>
-            <Alert severity="warning">真實寄信會將工作加入寄送佇列，並寄至下方預覽的實際收件人。{["schedule", "reminder"].includes(purpose) ? " 本通知會以單封 BCC 寄給所有人。" : ""}</Alert>
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              required
-              label="SMTP userid"
-              value={smtpUserid}
-              onChange={(event) => setSmtpUserid(event.target.value)}
-              helperText="例如 B00123456（可不含 @ntu.edu.tw）"
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              required
-              type="password"
-              autoComplete="new-password"
-              label="SMTP password"
-              value={smtpPassword}
-              onChange={(event) => setSmtpPassword(event.target.value)}
-              helperText="只會加密保存於本次 job，不會顯示於報告或 log"
-            />
-          </Grid>
+      <Grid container spacing={2}>
+        <Grid item xs={12}>
+          <Alert severity="warning">寄信會將工作加入寄送佇列，並寄至下方預覽的實際收件人。{["schedule", "reminder", "result"].includes(purpose) ? " 本通知會以單封 BCC 寄給所有人。" : ""}</Alert>
         </Grid>
-      )}
+        <Grid item xs={12} sm={6}>
+          <TextField
+            fullWidth
+            required
+            label="SMTP userid"
+            value={smtpUserid}
+            onChange={(event) => setSmtpUserid(event.target.value)}
+            helperText="例如 B00123456（可不含 @ntu.edu.tw）"
+          />
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField
+            fullWidth
+            required
+            type="password"
+            autoComplete="new-password"
+            label="SMTP password"
+            value={smtpPassword}
+            onChange={(event) => setSmtpPassword(event.target.value)}
+            helperText="只會加密保存於本次 job，不會顯示於報告或 log"
+          />
+        </Grid>
+      </Grid>
       {purpose === "account" && <><FormControlLabel control={<Checkbox checked={generatePasswords} onChange={(e) => { setGeneratePasswords(e.target.checked); if (!e.target.checked) setUpdatePasswords(false); }} />} label="為每位收件人產生密碼" /><FormControlLabel control={<Checkbox disabled={!generatePasswords} checked={updatePasswords} onChange={(e) => setUpdatePasswords(e.target.checked)} />} label="寄送成功後才更新該學生密碼" /></>}
-      <br/><Button size="large" color="primary" variant="contained" disabled={busy} onClick={requestSend}>{dryRun ? "執行 Dry-run" : "建立寄信工作並開始寄送"}</Button>
+      <br/><Button size="large" color="primary" variant="contained" disabled={busy} onClick={requestSend}>建立寄信工作並開始寄送</Button>
       {result && <Typography>結果：總計 {result.total || 0}、已寄 {result.sent || 0}、失敗 {result.failed || 0}、略過 {result.skipped || 0}</Typography>}
     </Paper>
 

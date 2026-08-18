@@ -5,12 +5,17 @@ const { renderTemplate } = require("./renderTemplate");
 const { decryptCredential } = require("./credentials");
 const { usesBccDelivery } = require("./templates");
 
-const HOURLY_LIMIT = Math.min(Number(process.env.EMAIL_HOURLY_LIMIT) || 200, 200);
-const BATCH_SIZE = Math.min(Number(process.env.EMAIL_BATCH_SIZE) || 20, HOURLY_LIMIT);
-const POLL_MS = Number(process.env.EMAIL_WORKER_POLL_MS) || 15000;
+const ACCOUNT_BATCH_SIZE = 10;
+const ACCOUNT_BATCH_INTERVAL_MS = 10 * 1000;
+const TEN_MINUTE_LIMIT = 40;
+const TEN_MINUTE_WINDOW_MS = 10 * 60 * 1000;
+const HOURLY_LIMIT = 250;
+const HOURLY_WINDOW_MS = 60 * 60 * 1000;
+const POLL_MS = Number(process.env.EMAIL_WORKER_POLL_MS) || 1000;
 let timer;
 let running = false;
 const cancellationRequests = new Set();
+const usesAccountRateLimit = (key) => /\.account$/.test(key || "");
 
 const safeErrorSummary = (error) => {
   const metadata = [error && error.code, error && error.command]
@@ -62,7 +67,10 @@ const publicJob = (job, includeRecipients = true) => {
     skipped: count("skipped"),
     canceled: count("canceled"),
     remaining: count("queued") + count("sending"),
-    hourlyLimit: HOURLY_LIMIT,
+    hourlyLimit: usesAccountRateLimit(job.templateKey) ? HOURLY_LIMIT : null,
+    tenMinuteLimit: usesAccountRateLimit(job.templateKey) ? TEN_MINUTE_LIMIT : null,
+    batchSize: usesAccountRateLimit(job.templateKey) ? ACCOUNT_BATCH_SIZE : null,
+    batchIntervalSeconds: usesAccountRateLimit(job.templateKey) ? ACCOUNT_BATCH_INTERVAL_MS / 1000 : null,
     nextRunAt: job.nextRunAt,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
@@ -74,14 +82,48 @@ const publicJob = (job, includeRecipients = true) => {
   return result;
 };
 
-const sentInWindow = async (now) => {
-  const since = new Date(now.getTime() - 60 * 60 * 1000);
+const accountUsage = async (now) => {
+  const hourAgo = new Date(now.getTime() - HOURLY_WINDOW_MS);
+  const tenMinutesAgo = new Date(now.getTime() - TEN_MINUTE_WINDOW_MS);
   const rows = await model.EmailJob.aggregate([
+    { $match: { templateKey: /\.account$/ } },
     { $unwind: "$recipients" },
-    { $match: { "recipients.status": "sent", "recipients.sentAt": { $gt: since } } },
-    { $group: { _id: null, count: { $sum: 1 }, oldest: { $min: "$recipients.sentAt" } } },
+    { $match: { "recipients.status": "sent", "recipients.sentAt": { $gt: hourAgo } } },
+    {
+      $group: {
+        _id: null,
+        sentAt: { $push: "$recipients.sentAt" },
+      },
+    },
   ]);
-  return rows[0] || { count: 0, oldest: null };
+  const sentAt = rows && rows[0] && rows[0].sentAt
+    ? rows[0].sentAt.map((value) => new Date(value))
+    : [];
+  const tenMinuteSentAt = sentAt.filter((value) => value > tenMinutesAgo);
+  return sentAt.length ? {
+    hourCount: sentAt.length,
+    hourOldest: sentAt.reduce((oldest, value) => value < oldest ? value : oldest),
+    tenMinuteCount: tenMinuteSentAt.length,
+    tenMinuteOldest: tenMinuteSentAt.length
+      ? tenMinuteSentAt.reduce((oldest, value) => value < oldest ? value : oldest)
+      : null,
+  } : {
+    hourCount: 0,
+    hourOldest: null,
+    tenMinuteCount: 0,
+    tenMinuteOldest: null,
+  };
+};
+
+const limitReleaseAt = (usage) => {
+  const releaseTimes = [];
+  if (usage.tenMinuteCount >= TEN_MINUTE_LIMIT && usage.tenMinuteOldest) {
+    releaseTimes.push(new Date(usage.tenMinuteOldest).getTime() + TEN_MINUTE_WINDOW_MS + 1000);
+  }
+  if (usage.hourCount >= HOURLY_LIMIT && usage.hourOldest) {
+    releaseTimes.push(new Date(usage.hourOldest).getTime() + HOURLY_WINDOW_MS + 1000);
+  }
+  return releaseTimes.length ? new Date(Math.max(...releaseTimes)) : null;
 };
 
 const finishIfDone = async (job) => {
@@ -105,18 +147,20 @@ const processJobs = async () => {
       $or: [{ nextRunAt: null }, { nextRunAt: { $lte: now } }],
     }).sort({ createdAt: 1 });
     if (!jobs.length) return;
-    const usage = await sentInWindow(now);
-    let available = Math.max(0, HOURLY_LIMIT - usage.count);
-    if (!available) {
-      const nextRunAt = new Date(new Date(usage.oldest).getTime() + 60 * 60 * 1000 + 1000);
-      await model.EmailJob.updateMany(
-        { _id: { $in: jobs.map((job) => job._id) } },
-        { $set: { status: "rate-limited", nextRunAt } }
-      );
-      return;
-    }
     for (const job of jobs) {
-      if (!available) break;
+      const bccDelivery = usesBccDelivery(job.templateKey);
+      const accountRateLimit = usesAccountRateLimit(job.templateKey);
+      let usage;
+      if (accountRateLimit) {
+        usage = await accountUsage(new Date());
+        const releaseAt = limitReleaseAt(usage);
+        if (releaseAt) {
+          job.status = "rate-limited";
+          job.nextRunAt = releaseAt;
+          await job.save();
+          continue;
+        }
+      }
       const smtpUserid = job.smtpUserid || process.env.SMTP_USERID || process.env.SMTP_USER;
       let smtpPassword;
       try {
@@ -144,7 +188,7 @@ const processJobs = async () => {
       job.status = "sending";
       job.nextRunAt = undefined;
       await job.save();
-      if (usesBccDelivery(job.templateKey)) {
+      if (bccDelivery) {
         const queued = job.recipients.filter((item) => item.status === "queued");
         if (queued.length) {
           let sharedContent;
@@ -178,7 +222,6 @@ const processJobs = async () => {
               recipient.sentAt = sentAt;
               recipient.error = undefined;
             });
-            available -= 1;
           } catch (error) {
             queued.forEach((recipient) => {
               recipient.status = "failed";
@@ -194,7 +237,15 @@ const processJobs = async () => {
         transport = undefined;
         continue;
       }
-      const queued = job.recipients.filter((item) => item.status === "queued").slice(0, Math.min(BATCH_SIZE, available));
+      const available = accountRateLimit
+        ? Math.min(
+          ACCOUNT_BATCH_SIZE,
+          TEN_MINUTE_LIMIT - usage.tenMinuteCount,
+          HOURLY_LIMIT - usage.hourCount
+        )
+        : job.recipients.length;
+      const queued = job.recipients.filter((item) => item.status === "queued").slice(0, available);
+      let sentThisBatch = 0;
       for (const recipient of queued) {
         if (cancellationRequests.has(String(job._id))) break;
         recipient.status = "sending";
@@ -228,7 +279,7 @@ const processJobs = async () => {
           recipient.status = "sent";
           recipient.sentAt = new Date();
           recipient.error = undefined;
-          available -= 1;
+          sentThisBatch += 1;
         } catch (error) {
           recipient.status = "failed";
           recipient.error = `Email delivery or post-send password update failed: ${safeErrorSummary(error)}`;
@@ -253,10 +304,16 @@ const processJobs = async () => {
         job.nextRunAt = undefined;
         await job.save();
         cancellationRequests.delete(String(job._id));
-      } else if (!(await finishIfDone(job)) && !available) {
-        const latest = await sentInWindow(new Date());
+      } else if (!(await finishIfDone(job)) && accountRateLimit) {
+        const afterBatchUsage = {
+          ...usage,
+          hourCount: usage.hourCount + sentThisBatch,
+          tenMinuteCount: usage.tenMinuteCount + sentThisBatch,
+          hourOldest: usage.hourOldest || (sentThisBatch ? new Date() : null),
+          tenMinuteOldest: usage.tenMinuteOldest || (sentThisBatch ? new Date() : null),
+        };
         job.status = "rate-limited";
-        job.nextRunAt = new Date(new Date(latest.oldest).getTime() + 60 * 60 * 1000 + 1000);
+        job.nextRunAt = limitReleaseAt(afterBatchUsage) || new Date(Date.now() + ACCOUNT_BATCH_INTERVAL_MS);
         await job.save();
       }
       transport.close();
@@ -282,4 +339,14 @@ const stopEmailWorker = () => {
   if (timer) clearInterval(timer);
 };
 
-module.exports = { HOURLY_LIMIT, processJobs, publicJob, requestCancellation, startEmailWorker, stopEmailWorker };
+module.exports = {
+  ACCOUNT_BATCH_INTERVAL_MS,
+  ACCOUNT_BATCH_SIZE,
+  HOURLY_LIMIT,
+  TEN_MINUTE_LIMIT,
+  processJobs,
+  publicJob,
+  requestCancellation,
+  startEmailWorker,
+  stopEmailWorker,
+};

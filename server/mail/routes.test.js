@@ -74,12 +74,12 @@ describe("email admin routes", () => {
     ] });
   });
 
-  test("dry-run is immediate and creates no persistent job", async () => {
+  test("dry-run requests are rejected and create no persistent job", async () => {
     const response = await request(app()).post("/email-send")
       .set("x-user", "ADMIN").set("x-authority", "2")
       .send({ templateKey: template.key, sourceMode: "csv", csvRows: [{ userID: "B1", name: "One", email: "one@example.com" }], dryRun: true })
-      .expect(200);
-    expect(response.body).toMatchObject({ total: 1, dryRun: 1, sent: 0 });
+      .expect(400);
+    expect(response.body.error).toBe("Dry-run is no longer supported.");
     expect(model.EmailJob.create).not.toHaveBeenCalled();
   });
 
@@ -93,7 +93,6 @@ describe("email admin routes", () => {
           { userID: "B1", name: "One", email: "one@example.com" },
           { userID: "B2", name: "Two", email: "two@example.com" },
         ],
-        dryRun: true,
       }).expect(400);
     expect(response.body.error).toContain("寄送前驗證失敗");
     expect(response.body.statuses.some((status) =>
@@ -181,7 +180,7 @@ describe("email admin routes", () => {
     }));
     const response = await request(app()).post("/email-send")
       .set("x-user", "ADMIN").set("x-authority", "2")
-      .send({ templateKey: template.key, sourceMode: "csv", csvRows: [{ userID: "B1", name: "One", email: "one@example.com" }], dryRun: false })
+      .send({ templateKey: template.key, sourceMode: "csv", csvRows: [{ userID: "B1", name: "One", email: "one@example.com" }] })
       .expect(202);
     expect(model.EmailJob.create).toHaveBeenCalled();
     expect(response.body).toMatchObject({ id: "job-1", status: "queued", total: 1, remaining: 1 });
@@ -277,7 +276,6 @@ describe("email admin routes", () => {
             email: "one@example.com",
           },
         ],
-        dryRun: false,
         smtp: {
           userid: "B00123456",
           password: "admin-smtp-secret",

@@ -40,6 +40,21 @@ const ensureDefaultTemplates = async () => {
       )
     )
   );
+  await Promise.all(
+    DEFAULT_TEMPLATES.filter((template) => template.purpose === "result").map(
+      (template) =>
+        model.EmailTemplate.updateOne(
+          {
+            key: template.key,
+            body: template.body.replace(
+              "<p>同學您好",
+              "<p>{{name}}同學您好"
+            ),
+          },
+          { $set: { body: template.body } }
+        )
+    )
+  );
 };
 
 const getDefaultTemplateValues = async () => {
@@ -350,7 +365,6 @@ router.post(
       sourceMode = "csv",
       grades = [],
       csvRows = [],
-      dryRun = true,
       generatePasswords = false,
       updatePasswords = false,
       variables = {},
@@ -365,12 +379,14 @@ router.post(
       !Array.isArray(grades) ||
       !Array.isArray(csvRows) ||
       !Array.isArray(reminderCourseIDs) ||
-      typeof dryRun !== "boolean" ||
       typeof generatePasswords !== "boolean" ||
       typeof updatePasswords !== "boolean" ||
       typeof recipientOverride !== "string" ||
       !smtp || typeof smtp !== "object" || Array.isArray(smtp)
     ) return res.status(400).send({ error: "Invalid send request." });
+    if (Object.prototype.hasOwnProperty.call(req.body, "dryRun")) {
+      return res.status(400).send({ error: "Dry-run is no longer supported." });
+    }
     const selectedGrades = normalizeGrades(grades);
     const isReminder = templateKey.endsWith(".reminder");
     if (isReminder && sourceMode !== "database") {
@@ -399,7 +415,7 @@ router.post(
     const defaults = await getDefaultTemplateValues();
     const rows = await buildRows({ sourceMode, grades: selectedGrades, csvRows, reminderCourseIDs: selectedReminderCourseIDs });
     if (!rows.length) return res.status(400).send({ error: "No recipients selected." });
-    if (!dryRun && rows.length > 50 && !override && confirmedLargeSend !== true) {
+    if (rows.length > 50 && !override && confirmedLargeSend !== true) {
       return res.status(409).send({ error: "Large send confirmation required.", requiresConfirmation: true, count: rows.length });
     }
     const recipients = await prepareRecipients(rows, defaults, variables, override);
@@ -413,7 +429,7 @@ router.post(
       }
       try {
         const previewValues = { ...recipient.values };
-        if (generatePasswords) previewValues.password = "dry-run-generated-password";
+        if (generatePasswords) previewValues.password = "generated-password-placeholder";
         const rendered = renderTemplate(template, previewValues);
         if (usesBccDelivery(templateKey)) {
           if (!sharedBccContent) sharedBccContent = rendered;
@@ -421,12 +437,11 @@ router.post(
             rendered.subject !== sharedBccContent.subject ||
             rendered.html !== sharedBccContent.html
           ) {
-            const error = new Error("時程通知與未選通知使用 BCC 寄送，所有收件人的信件主旨與內容必須完全相同。");
+            const error = new Error("時程、未選與結果通知使用 BCC 寄送，所有收件人的信件主旨與內容必須完全相同。");
             error.code = "BCC_CONTENT_MISMATCH";
             throw error;
           }
         }
-        statuses.push({ index: recipient.index, identity: recipient.userID || recipient.email, to: recipient.actualRecipient, status: "dry-run", message: "Rendered successfully; no email sent and no password updated." });
       } catch (error) {
         validationFailed = true;
         statuses.push({ index: recipient.index, identity: recipient.userID || recipient.email, to: recipient.actualRecipient, status: "failed", message: error.message });
@@ -434,21 +449,18 @@ router.post(
         recipient.error = error.message;
       }
     }
-    if (dryRun || validationFailed) {
+    if (validationFailed) {
       const validationMessages = [...new Set(
         statuses
           .filter((item) => item.status === "failed")
           .map((item) => item.message)
       )];
-      return res.status(validationFailed ? 400 : 200).send({
-        error: validationFailed
-          ? `寄送前驗證失敗：${validationMessages.join("；")}`
-          : undefined,
+      return res.status(400).send({
+        error: `寄送前驗證失敗：${validationMessages.join("；")}`,
         total: recipients.length,
         sent: 0,
         failed: statuses.filter((item) => item.status === "failed").length,
         skipped: statuses.filter((item) => item.status === "skipped").length,
-        dryRun: statuses.filter((item) => item.status === "dry-run").length,
         statuses,
         variables: extractVariables(template.subject, template.body),
       });

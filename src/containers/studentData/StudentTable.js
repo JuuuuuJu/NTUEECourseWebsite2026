@@ -33,9 +33,16 @@ function descendingComparator(a, b, orderBy) {
 }
 
 function getComparator(order, orderBy) {
-  return order === "desc"
-    ? (a, b) => descendingComparator(a, b, orderBy)
-    : (a, b) => -descendingComparator(a, b, orderBy);
+  return (a, b) => {
+    const primaryOrder = descendingComparator(a, b, orderBy);
+    if (primaryOrder !== 0) {
+      return order === "desc" ? primaryOrder : -primaryOrder;
+    }
+    // A grade sort always uses ascending student ID as its secondary key.
+    return orderBy === "grade"
+      ? String(a.id).localeCompare(String(b.id))
+      : 0;
+  };
 }
 
 function stableSort(array, comparator) {
@@ -323,7 +330,7 @@ export default function StudentTable({
 }) {
   const classes = useStyles();
   const [order, setOrder] = React.useState("asc");
-  const [orderBy, setOrderBy] = React.useState("calories");
+  const [orderBy, setOrderBy] = React.useState("grade");
   const [page, setPage] = React.useState(0);
   const [rowsPerPage, setRowsPerPage] = React.useState(100);
   const [search, setSearch] = React.useState("");

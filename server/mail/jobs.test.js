@@ -22,7 +22,14 @@ jest.mock("./renderTemplate", () => ({
 const model = require("../database/mongo/model");
 const { sendRenderedBccEmail, sendRenderedEmail } = require("./mailer");
 const { updateStudentPassword } = require("./passwords");
-const { processJobs, publicJob } = require("./jobs");
+const {
+  ACCOUNT_BATCH_INTERVAL_MS,
+  ACCOUNT_BATCH_SIZE,
+  HOURLY_LIMIT,
+  TEN_MINUTE_LIMIT,
+  processJobs,
+  publicJob,
+} = require("./jobs");
 
 const makeJob = (recipients, extra = {}) => ({
   _id: "job-1",
@@ -46,6 +53,7 @@ const makeJob = (recipients, extra = {}) => ({
 describe("persistent email jobs", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    model.EmailJob.aggregate.mockResolvedValue([]);
     process.env.SMTP_USERID = "B00123456";
     process.env.SMTP_PASSWORD = "not-returned";
     process.env.EMAIL_CREDENTIAL_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -131,17 +139,64 @@ describe("persistent email jobs", () => {
     expect(recipient.status).toBe("sent");
   });
 
-  test("rolling-hour hard limit rate-limits without sending", async () => {
-    const job = makeJob([{ _id: "r1", status: "queued", attempts: 0 }]);
+  test("individual account emails send ten at a time and wait ten seconds", async () => {
+    const recipients = Array.from({ length: 25 }, (_, index) => ({
+      _id: `r${index}`,
+      actualRecipient: `student${index}@example.com`,
+      values: {},
+      status: "queued",
+      attempts: 0,
+    }));
+    const job = makeJob(recipients, {
+      generatePasswords: false,
+      updatePasswords: false,
+    });
     model.EmailJob.find.mockReturnValue({ sort: jest.fn(async () => [job]) });
-    model.EmailJob.aggregate.mockResolvedValue([{ count: 200, oldest: new Date() }]);
-    model.EmailJob.updateMany.mockResolvedValue({});
+    sendRenderedEmail.mockResolvedValue({});
+    const before = Date.now();
+    await processJobs();
+    expect(sendRenderedEmail).toHaveBeenCalledTimes(ACCOUNT_BATCH_SIZE);
+    expect(job.status).toBe("rate-limited");
+    expect(job.nextRunAt.getTime()).toBeGreaterThanOrEqual(before + ACCOUNT_BATCH_INTERVAL_MS);
+    expect(recipients.filter((recipient) => recipient.status === "sent")).toHaveLength(10);
+    expect(recipients.filter((recipient) => recipient.status === "queued")).toHaveLength(15);
+  });
+
+  test("account emails wait for the ten-minute limit to be released", async () => {
+    const oldest = new Date(Date.now() - 2 * 60 * 1000);
+    const recipient = { _id: "r1", actualRecipient: "one@example.com", values: {}, status: "queued", attempts: 0 };
+    const job = makeJob([recipient], { generatePasswords: false, updatePasswords: false });
+    model.EmailJob.find.mockReturnValue({ sort: jest.fn(async () => [job]) });
+    model.EmailJob.aggregate.mockResolvedValue([{
+      sentAt: Array.from({ length: TEN_MINUTE_LIMIT }, (_, index) => new Date(oldest.getTime() + index)),
+    }]);
     await processJobs();
     expect(sendRenderedEmail).not.toHaveBeenCalled();
-    expect(model.EmailJob.updateMany).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ $set: expect.objectContaining({ status: "rate-limited" }) })
-    );
+    expect(job.status).toBe("rate-limited");
+    expect(job.nextRunAt.getTime()).toBe(oldest.getTime() + 10 * 60 * 1000 + 1000);
+  });
+
+  test("account email public progress reports both school limits", () => {
+    const result = publicJob(makeJob([]));
+    expect(result).toMatchObject({
+      batchSize: ACCOUNT_BATCH_SIZE,
+      batchIntervalSeconds: ACCOUNT_BATCH_INTERVAL_MS / 1000,
+      tenMinuteLimit: TEN_MINUTE_LIMIT,
+      hourlyLimit: HOURLY_LIMIT,
+    });
+  });
+
+  test("account emails also wait when the rolling hourly limit is full", async () => {
+    const oldest = new Date(Date.now() - 50 * 60 * 1000);
+    const recipient = { _id: "r1", actualRecipient: "one@example.com", values: {}, status: "queued", attempts: 0 };
+    const job = makeJob([recipient], { generatePasswords: false, updatePasswords: false });
+    model.EmailJob.find.mockReturnValue({ sort: jest.fn(async () => [job]) });
+    model.EmailJob.aggregate.mockResolvedValue([{
+      sentAt: Array.from({ length: HOURLY_LIMIT }, (_, index) => new Date(oldest.getTime() + index)),
+    }]);
+    await processJobs();
+    expect(sendRenderedEmail).not.toHaveBeenCalled();
+    expect(job.nextRunAt.getTime()).toBe(oldest.getTime() + 60 * 60 * 1000 + 1000);
   });
 
   test("schedule notifications with identical content are sent once using BCC", async () => {
@@ -161,7 +216,27 @@ describe("persistent email jobs", () => {
     await processJobs();
     expect(sendRenderedEmail).not.toHaveBeenCalled();
     expect(sendRenderedBccEmail).toHaveBeenCalledTimes(1);
+    expect(publicJob(job)).toMatchObject({ hourlyLimit: null, tenMinuteLimit: null });
     expect(sendRenderedBccEmail.mock.calls[0][0].bcc).toEqual(["one@example.com", "two@example.com"]);
+    expect(recipients.map((recipient) => recipient.status)).toEqual(["sent", "sent"]);
+  });
+
+  test("result notifications are sent once using BCC", async () => {
+    const recipients = [
+      { _id: "r1", actualRecipient: "one@example.com", values: {}, status: "queued", attempts: 0 },
+      { _id: "r2", actualRecipient: "two@example.com", values: {}, status: "queued", attempts: 0 },
+    ];
+    const job = makeJob(recipients, {
+      templateKey: "ten-select-two.result",
+      generatePasswords: false,
+      updatePasswords: false,
+      templateBody: "same result body",
+    });
+    model.EmailJob.find.mockReturnValue({ sort: jest.fn(async () => [job]) });
+    sendRenderedBccEmail.mockResolvedValue({});
+    await processJobs();
+    expect(sendRenderedBccEmail).toHaveBeenCalledTimes(1);
+    expect(job.status).toBe("completed");
     expect(recipients.map((recipient) => recipient.status)).toEqual(["sent", "sent"]);
   });
 });

@@ -438,7 +438,7 @@ export default function StudentData() {
     const element = document.createElement("a");
     element.setAttribute(
       "href",
-      `data:text/plain;charset=utf-8,${encodeURIComponent(text)}`
+      `data:text/csv;charset=utf-8,${encodeURIComponent(text)}`
     );
     element.setAttribute("download", filename);
 
@@ -479,6 +479,15 @@ export default function StudentData() {
   const handleDownload = () => {
     // console.log(csv);
     download("datas.csv", csv);
+  };
+
+  const handleDownloadAllStudents = () => {
+    const csvData = data.map((student) => ({
+      userID: student.id,
+      name: student.name,
+      grade: student.grade,
+    }));
+    download("students.csv", Papa.unparse(csvData));
   };
 
   const handleGeneratePassword = async () => {
@@ -1004,6 +1013,16 @@ export default function StudentData() {
                 disabled={authority !== 2}
               >
                 Add Students (csv)
+              </Button>
+            </Grid>
+            <Grid item>
+              <Button
+                variant="outlined"
+                color="primary"
+                onClick={handleDownloadAllStudents}
+                disabled={data.length === 0}
+              >
+                Download All Students (csv)
               </Button>
             </Grid>
             <Grid item>

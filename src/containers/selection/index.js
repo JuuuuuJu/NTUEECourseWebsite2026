@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useHistory } from "react-router";
 import { DragDropContext } from "react-beautiful-dnd";
 import { useParams } from "react-router-dom";
@@ -111,6 +111,7 @@ const Selection = () => {
   const [digitalLabGroup, setDigitalLabGroup] = useState(null);
   const [joinCode, setJoinCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const selectionSaveQueue = useRef(Promise.resolve());
   const classes = useStyles();
   const courseType = data ? data.type : null;
   useEffect(() => {
@@ -302,6 +303,14 @@ const Selection = () => {
       selected: newSelection.selected,
       unselected: newSelection.unselected,
     }));
+    selectionSaveQueue.current = selectionSaveQueue.current
+      .catch(() => undefined)
+      .then(() => SelectAPI.putSelections(courseId, newSelection.selected))
+      .then(() => showAlert("success", "志願序已自動儲存。"))
+      .catch((err) => {
+        console.error(err);
+        showAlert("error", "自動儲存志願序失敗，請按「正式儲存」重試。");
+      });
   };
 
   return (
