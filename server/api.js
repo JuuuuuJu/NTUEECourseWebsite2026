@@ -210,7 +210,7 @@ router
         res.status(400).end();
         return;
       }
-      if (start < 0 || end < 0) {
+      if (start < 0 || end < 0 || start >= end) {
         res.status(400).end();
         return;
       }
@@ -544,7 +544,10 @@ router
         res.status(400).end();
         return;
       }
-      if (!req.body.every((option) => optionNames.includes(option))) {
+      if (
+        !req.body.every((option) => optionNames.includes(option)) ||
+        new Set(req.body).size !== req.body.length
+      ) {
         res.status(400).end();
         return;
       }
@@ -783,26 +786,19 @@ router
       });
       await Promise.all(
         modifiedData_new.map(async (data) => {
-          const { id, name, type, description, options, number, students } =
-            data;
+          const { id, students } = data;
           const course = await model.Course.findOne({ id }).exec();
-          const newStudents = students.map((student) => {
-            return student.toUpperCase();
-          });
           if (course) {
-            await model.Course.updateOne(
-              {
-                id,
-              },
-              {
-                name,
-                type,
-                description,
-                options,
-                number,
-                students: newStudents,
-              }
-            );
+            // Only update the fields that were sent, so a partial update
+            // does not crash or blank out the others.
+            const update = {};
+            ["name", "type", "description", "options", "number"].forEach((key) => {
+              if (data[key] !== undefined) update[key] = data[key];
+            });
+            if (Array.isArray(students)) {
+              update.students = students.map((student) => String(student).toUpperCase());
+            }
+            await model.Course.updateOne({ id }, update);
           }
         })
       );
@@ -953,7 +949,11 @@ router.get(
   permissionRequired(constants.AUTHORITY_MAINTAINER),
   asyncHandler(async (req, res, next) => {
     let { userID } = req.query;
-    userID = userID.toUpperCase();
+    if (typeof userID !== "string" || !userID.trim()) {
+      res.status(400).end();
+      return;
+    }
+    userID = userID.trim().toUpperCase();
     const userData = await model.Student.findOne({ userID });
     const selectionData = await model.Selection.find({ userID }).sort({
       courseID: 1,

@@ -365,7 +365,14 @@ const Selection = () => {
           />
         </div>
       )}
-      <Snackbar open={alert.open} autoHideDuration={6000} onClose={handleClose}>
+      {/* Shown at the top so it never covers the save buttons at the bottom. */}
+      <Snackbar
+        open={alert.open}
+        autoHideDuration={6000}
+        onClose={handleClose}
+        anchorOrigin={{ vertical: "top", horizontal: "center" }}
+        style={{ top: 80 }}
+      >
         <Alert onClose={handleClose} severity={alert.severity}>
           {alert.message}
         </Alert>

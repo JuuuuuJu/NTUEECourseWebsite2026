@@ -39,6 +39,12 @@ describe("email admin routes", () => {
     process.env.EMAIL_CREDENTIAL_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   });
 
+  test("malformed job ids return 404 instead of a server error", async () => {
+    const response = await request(app()).get("/email-jobs/not-an-id").set("x-user", "B00000000").set("x-authority", "2");
+    expect(response.status).toBe(404);
+    expect(model.EmailJob.findById).not.toHaveBeenCalled();
+  });
+
   test("mail job routes do not block public login or opentime", async () => {
     await request(app()).post("/session").expect(401);
     await request(app()).get("/opentime").expect(200, { start: 1, end: 2 });
@@ -131,7 +137,7 @@ describe("email admin routes", () => {
 
   test("retry-failed queues only failed recipients", async () => {
     const job = {
-      _id: "job-retry",
+      _id: "0000000000000000000000a1",
       templateKey: template.key,
       subject: "Hi",
       recipientSource: { summary: "CSV" },
@@ -145,7 +151,7 @@ describe("email admin routes", () => {
       save: jest.fn(async function save() { return this; }),
     };
     model.EmailJob.findById.mockResolvedValue(job);
-    const response = await request(app()).post("/email-jobs/job-retry/retry-failed")
+    const response = await request(app()).post("/email-jobs/0000000000000000000000a1/retry-failed")
       .set("x-user", "ADMIN").set("x-authority", "2").expect(202);
     expect(job.recipients.map((recipient) => recipient.status)).toEqual(["sent", "queued", "skipped"]);
     expect(job.recipients[1].attempts).toBe(1);
@@ -155,7 +161,7 @@ describe("email admin routes", () => {
 
   test("cancel stops an active job without changing recipient results", async () => {
     const job = {
-      _id: "job-cancel",
+      _id: "0000000000000000000000a2",
       templateKey: template.key,
       subject: "Hi",
       recipientSource: { summary: "CSV" },
@@ -167,7 +173,7 @@ describe("email admin routes", () => {
       save: jest.fn(async function save() { return this; }),
     };
     model.EmailJob.findById.mockResolvedValue(job);
-    const response = await request(app()).post("/email-jobs/job-cancel/cancel")
+    const response = await request(app()).post("/email-jobs/0000000000000000000000a2/cancel")
       .set("x-user", "ADMIN").set("x-authority", "2").expect(200);
     expect(job.status).toBe("canceled");
     expect(job.recipients.map((recipient) => recipient.status)).toEqual(["sent", "canceled"]);
@@ -176,20 +182,20 @@ describe("email admin routes", () => {
 
   test("real send persists and returns a queued job without SMTP password", async () => {
     model.EmailJob.create.mockImplementation(async (data) => ({
-      _id: "job-1", ...data, createdAt: new Date(), updatedAt: new Date(),
+      _id: "0000000000000000000000b1", ...data, createdAt: new Date(), updatedAt: new Date(),
     }));
     const response = await request(app()).post("/email-send")
       .set("x-user", "ADMIN").set("x-authority", "2")
       .send({ templateKey: template.key, sourceMode: "csv", csvRows: [{ userID: "B1", name: "One", email: "one@example.com" }] })
       .expect(202);
     expect(model.EmailJob.create).toHaveBeenCalled();
-    expect(response.body).toMatchObject({ id: "job-1", status: "queued", total: 1, remaining: 1 });
+    expect(response.body).toMatchObject({ id: "0000000000000000000000b1", status: "queued", total: 1, remaining: 1 });
     expect(JSON.stringify(response.body)).not.toContain("server-only");
   });
 
   test("admin password CSV contains only this job generated passwords", async () => {
     model.EmailJob.findById.mockResolvedValue({
-      _id: "job-passwords",
+      _id: "0000000000000000000000a3",
       generatePasswords: true,
       recipients: [
         {
@@ -224,13 +230,13 @@ describe("email admin routes", () => {
       ],
     });
     const response = await request(app())
-      .get("/email-jobs/job-passwords/passwords.csv")
+      .get("/email-jobs/0000000000000000000000a3/passwords.csv")
       .set("x-user", "ADMIN")
       .set("x-authority", "2")
       .expect(200)
       .expect("Cache-Control", "no-store");
     expect(response.headers["content-disposition"]).toContain(
-      "email-job-job-passwords-passwords.csv"
+      "email-job-0000000000000000000000a3-passwords.csv"
     );
     expect(response.text).toContain(
       '"userID","name","grade","email","password","status","sentAt","error"'
@@ -242,12 +248,12 @@ describe("email admin routes", () => {
 
   test("password CSV rejects jobs that did not generate passwords", async () => {
     model.EmailJob.findById.mockResolvedValue({
-      _id: "job-no-passwords",
+      _id: "0000000000000000000000a4",
       generatePasswords: false,
       recipients: [],
     });
     await request(app())
-      .get("/email-jobs/job-no-passwords/passwords.csv")
+      .get("/email-jobs/0000000000000000000000a4/passwords.csv")
       .set("x-user", "ADMIN")
       .set("x-authority", "2")
       .expect(400, { error: "This job did not generate passwords." });
@@ -293,13 +299,13 @@ describe("email admin routes", () => {
   });
 
   test("completed job remains listed until acknowledge and acknowledge persists actor", async () => {
-    const job = { _id: "job-1", templateKey: template.key, subject: "Hi", recipientSource: { summary: "CSV" }, status: "completed", recipients: [], createdAt: new Date(), updatedAt: new Date() };
+    const job = { _id: "0000000000000000000000b1", templateKey: template.key, subject: "Hi", recipientSource: { summary: "CSV" }, status: "completed", recipients: [], createdAt: new Date(), updatedAt: new Date() };
     model.EmailJob.find.mockReturnValue({ sort: jest.fn(() => ({ limit: jest.fn(async () => [job]) })) });
     let response = await request(app()).get("/email-jobs").set("x-user", "ADMIN").set("x-authority", "2").expect(200);
     expect(response.body).toHaveLength(1);
     model.EmailJob.findByIdAndUpdate.mockResolvedValue({ ...job, acknowledgedAt: new Date(), acknowledgedBy: "ADMIN" });
-    await request(app()).post("/email-jobs/job-1/acknowledge").set("x-user", "ADMIN").set("x-authority", "2").expect(200);
-    expect(model.EmailJob.findByIdAndUpdate).toHaveBeenCalledWith("job-1", expect.objectContaining({ acknowledgedBy: "ADMIN" }), { new: true });
+    await request(app()).post("/email-jobs/0000000000000000000000b1/acknowledge").set("x-user", "ADMIN").set("x-authority", "2").expect(200);
+    expect(model.EmailJob.findByIdAndUpdate).toHaveBeenCalledWith("0000000000000000000000b1", expect.objectContaining({ acknowledgedBy: "ADMIN" }), { new: true });
     expect(model.EmailJob.find.mock.calls[0][0]).toEqual({ acknowledgedAt: null });
   });
 });

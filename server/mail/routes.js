@@ -1,5 +1,6 @@
 const express = require("express");
 const asyncHandler = require("express-async-handler");
+const mongoose = require("mongoose");
 
 const constants = require("../constants");
 const model = require("../database/mongo/model");
@@ -29,6 +30,12 @@ const adminRequired = (req, res, next) => {
 };
 
 router.use(["/email-templates", "/email-send", "/email-recipients", "/email-jobs"], adminRequired);
+
+// A malformed job id cannot match any job; answer 404 instead of a cast error.
+router.param("id", (req, res, next, id) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) return res.sendStatus(404);
+  return next();
+});
 
 const ensureDefaultTemplates = async () => {
   await Promise.all(
