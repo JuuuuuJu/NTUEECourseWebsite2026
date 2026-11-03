@@ -1,0 +1,21 @@
+# Local preview only (not used on the InfoDep server):
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+# Serves http://localhost:8080 and uses separate local volumes/network.
+
+name: course-local
+
+services:
+  web:
+    ports:
+      - "127.0.0.1:8080:80"
+
+networks:
+  nginx:
+    external: false
+    name: course-local-nginx
+
+volumes:
+  course-mongo-data:
+    name: course-local_mongo-data
+  course-db-backups:
+    name: course-local_db-backups

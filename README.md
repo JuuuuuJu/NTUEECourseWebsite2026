@@ -17,49 +17,65 @@ email: `b07901016@ntu.edu.tw`
 - [劉奇聖](https://github.com/MortalHappiness), email: `b07901069@ntu.edu.tw`
 - [賴群貿](https://github.com/Mecoli1219), email: `b09901186@ntu.edu.tw`
 
-## 部署
+## Production
 
-### Production
+使用 `2024-fall` branch，以根目錄的 `docker-compose.yml` 部署（Service ID `course`）。
 
-第一次從 2021 版切換至 2026 版：
+首次部署：
 
-```shell
-cp ../NTUEECourseWebsite2021/.env .env
-# 確認 .env，特別是 EMAIL_CREDENTIAL_KEY、WEBSITE_URL、CONTACT_EMAIL
-./deploy_production.sh --check
-./deploy_production.sh
+```bash
+git clone --branch 2024-fall https://github.com/JuuuuuJu/NTUEECourseWebsite2026.git ~/productions/course
+cd ~/productions/course
+cp .env.example .env
+vim .env
+docker compose config
+docker compose up -d --build
+docker compose ps
 ```
 
-之後更新版本：
+更新（先備份 MongoDB 至 `../NTUEECourseWebsite2026-deploy-backups/`，再 pull、重建並檢查）：
 
-```shell
-git pull --ff-only
-./deploy.sh --production --check
-./deploy.sh --production
+```bash
+./deploy.sh
 ```
 
-部署時會自動備份 MongoDB，並詢問要沿用目前資料或恢復 `.gz` 備份。備份位於 repo 同層的 `NTUEECourseWebsite2026-deploy-backups/`。
+或手動：
 
-Production 服務位於 `http://127.0.0.1:3000`，正式網域需由主機 nginx 反向代理至此。
-
-### Staging
-
-```shell
-cp .env.staging.example .env.staging  # 第一次執行時建立，並更換範例密碼
-./deploy.sh --staging --check
-./deploy.sh --staging
+```bash
+git pull --ff-only origin 2024-fall
+docker compose up -d --build
+docker compose ps
 ```
 
-Staging 與 production 的容器及資料庫互相獨立，服務位於 `http://127.0.0.1:3001`。
+部署後確認 `https://course.ntuee.org/` 可正常登入。停止服務：
 
-### Rollback 至 2021 版
-
-```shell
-./deploy_old.sh --check
-./deploy_old.sh
+```bash
+docker compose down
 ```
 
-> 請勿執行 `docker compose down --volumes` 或 `docker-compose down -v`，否則會刪除資料庫 volume。
+> 請勿加上 `--volumes`／`-v`，否則會刪除資料庫 volume。
+
+從備份還原 MongoDB：
+
+```bash
+docker compose exec -T course-mongodb sh -c 'mongorestore -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --archive --gzip --drop' < ../NTUEECourseWebsite2026-deploy-backups/<備份檔>.archive.gz
+```
+
+### 本機預覽
+
+```bash
+cp .env.example .env   # 填入本機測試用的值
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+```
+
+網站位於 <http://localhost:8080>，使用獨立的本機 volume，不會碰到正式資料。
+
+### Staging（獨立測試機）
+
+```bash
+cp .env.staging.example .env.staging
+docker compose -f docker-compose.staging.yml --env-file .env.staging up -d --build
+```
 
 ## Quick Start (Development mode)
 

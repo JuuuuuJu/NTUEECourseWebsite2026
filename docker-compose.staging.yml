@@ -1,3 +1,6 @@
+# Staging on a separate test machine (not the InfoDep server).
+name: ntueecoursewebsite2026-staging
+
 services:
   nginx:
     build:

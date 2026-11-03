@@ -22,6 +22,7 @@ const backupService = require("./backup/service");
 const createBackupRouter = require("./backup/routes");
 const runDistribution = require("./distribution/run");
 const { sortResultsForCsv } = require("./resultCsv");
+const { buildStudentResult } = require("./studentResult");
 
 // ========================================
 
@@ -225,6 +226,33 @@ router
       res.status(204).end();
     })
   );
+
+// Registered before router.use(openTimeMiddleware) so results stay visible
+// after the selection period ends.
+router.route("/result").get(
+  loginRequired,
+  asyncHandler(async (req, res, next) => {
+    const { userID } = req.session;
+    const [startTime, endTime, selections, results, courses] = await Promise.all([
+      model.OpenTime.findOne({ type: constants.START_TIME_KEY }).exec(),
+      model.OpenTime.findOne({ type: constants.END_TIME_KEY }).exec(),
+      model.Selection.find({ userID }).sort({ courseID: 1, ranking: 1 }).exec(),
+      model.Result.find({ studentID: userID }).exec(),
+      model.Course.find({}, "id name").exec(),
+    ]);
+    res.send(
+      buildStudentResult({
+        now: Math.floor(new Date() / 1000),
+        start: startTime ? startTime.time : null,
+        end: endTime ? endTime.time : null,
+        isMaintainer: req.session.authority >= constants.AUTHORITY_MAINTAINER,
+        selections,
+        results,
+        courses,
+      })
+    );
+  })
+);
 
 router.use(openTimeMiddleware).get(
   "/courses",
@@ -639,45 +667,6 @@ router
       res.status(204).end();
     })
   );
-
-router.route("/result").get(
-  openTimeMiddleware,
-  loginRequired,
-  asyncHandler(async (req, res, next) => {
-    const { userID } = req.session;
-    console.log(userID);
-    const results = await model.Selection.find({ userID }).sort({
-      courseID: 1,
-      ranking: 1,
-    });
-    const digitalLabResult = await model.Result.findOne({
-      studentID: userID,
-      optionName: "數電實驗",
-    });
-    const courses = await model.Course.find({}, "id name");
-    const coursesId2Name = {};
-    await Promise.all(
-      courses.map((course) => {
-        coursesId2Name[course.id] = course.name;
-      })
-    );
-
-    if (digitalLabResult) {
-      const course = courses.find(
-        (item) => item.name === digitalLabResult.courseName
-      );
-      results.unshift({
-        _id: digitalLabResult._id,
-        courseID: course ? course.id : "Ten-Select-Two",
-        userID,
-        name: digitalLabResult.optionName,
-        ranking: "獨立抽籤錄取（固定第一志願）",
-      });
-    }
-
-    res.send({ results, coursesId2Name });
-  })
-);
 
 router
   .route("/course")

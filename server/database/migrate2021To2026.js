@@ -1,5 +1,31 @@
+const bcrypt = require("bcrypt");
 const model = require("./mongo/model");
+const constants = require("../constants");
 const { DEFAULT_TEMPLATES } = require("../mail/templates");
+
+const ADMIN_USER_ID = "B00000000";
+
+// First deployment on an empty database needs an admin to log in. Existing
+// admins are never modified, so this is safe to run on every deploy.
+const ensureAdmin = async () => {
+  const hasAdmin = await model.Student.exists({
+    authority: { $gte: constants.AUTHORITY_ADMIN },
+  });
+  if (hasAdmin) return "existing";
+  const password = process.env.ADMIN_INITIAL_PASSWORD;
+  if (!password) {
+    console.warn("No admin account found and ADMIN_INITIAL_PASSWORD is not set.");
+    return "missing";
+  }
+  await model.Student.create({
+    userID: ADMIN_USER_ID,
+    grade: 2,
+    name: "Admin",
+    authority: constants.AUTHORITY_ADMIN,
+    password: await bcrypt.hash(password, 10),
+  });
+  return "created";
+};
 
 const DIGITAL_LAB_OPTION = {
   name: "數電實驗",
@@ -49,6 +75,8 @@ const migrate = async () => {
   ];
   for (const collectionModel of models) await collectionModel.createIndexes();
 
+  const admin = await ensureAdmin();
+
   const counts = {};
   for (const collectionModel of models) {
     counts[collectionModel.collection.collectionName] = await collectionModel.countDocuments({});
@@ -57,7 +85,7 @@ const migrate = async () => {
     throw new Error(`Expected at least ${DEFAULT_TEMPLATES.length} email templates`);
   }
 
-  console.log(JSON.stringify({ migrated: true, counts }, null, 2));
+  console.log(JSON.stringify({ migrated: true, admin, counts }, null, 2));
 };
 
 migrate()

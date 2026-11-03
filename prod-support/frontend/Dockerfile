@@ -9,6 +9,9 @@ RUN npm i serve -g
 COPY ["package.json", "./"]
 RUN npm install
 
+# build flags previously read from the copied .env (now excluded by .dockerignore)
+ENV DISABLE_ESLINT_PLUGIN=true ESLINT_NO_DEV_ERRORS=true SKIP_PREFLIGHT_CHECK=true
+
 # copy everything to /app
 COPY . .
 

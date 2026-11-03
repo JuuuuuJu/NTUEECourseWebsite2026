@@ -147,3 +147,5 @@ tmp/staging-second-round/
 
 tmp/staging-email-stress/
 tmp/db-backups/
+.env.production
+/data/
