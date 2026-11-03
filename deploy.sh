@@ -20,12 +20,12 @@ cd "$ROOT_DIR"
 docker compose config --quiet
 
 echo "Starting MongoDB to take a backup..."
-docker compose up -d --wait course-mongodb
+docker compose up -d --wait mongodb
 
 db_name=$(sed -n 's/^MONGO_DBNAME=//p' .env | head -n1)
 mkdir -p "$BACKUP_DIR"
 archive="$BACKUP_DIR/production-${db_name}-predeploy-$(date +%Y%m%d-%H%M%S).archive.gz"
-docker compose exec -T -e DB="$db_name" course-mongodb sh -eu -c \
+docker compose exec -T -e DB="$db_name" mongodb sh -eu -c \
   'mongodump --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --db "$DB" --archive --gzip' \
   > "$archive"
 [[ -s "$archive" ]] || { echo "Backup is empty; aborting." >&2; rm -f "$archive"; exit 1; }

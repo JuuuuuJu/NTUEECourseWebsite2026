@@ -32,7 +32,7 @@ docker compose ps
 ## 從備份還原
 
 ```bash
-docker compose exec -T course-mongodb sh -c 'mongorestore -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --archive --gzip --drop' < ../NTUEECourseWebsite2026-deploy-backups/<備份檔>.archive.gz
+docker compose exec -T mongodb sh -c 'mongorestore -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --archive --gzip --drop' < ../NTUEECourseWebsite2026-deploy-backups/<備份檔>.archive.gz
 ```
 
 > 任何 `docker compose down` 都不要加 `-v`／`--volumes`，否則會刪除資料庫 volume。

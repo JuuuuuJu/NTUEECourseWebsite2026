@@ -16,10 +16,10 @@ services:
         aliases:
           - course
     depends_on:
-      - course-frontend
-      - course-backend
+      - frontend
+      - backend
 
-  course-frontend:
+  frontend:
     build:
       context: .
       dockerfile: ./prod-support/frontend/Dockerfile
@@ -27,7 +27,7 @@ services:
     expose:
       - "3000"
 
-  course-backend:
+  backend:
     build:
       context: .
       dockerfile: ./prod-support/backend/Dockerfile
@@ -37,27 +37,27 @@ services:
     env_file:
       - .env
     environment:
-      MONGO_HOST: course-mongodb
+      MONGO_HOST: mongodb
       MONGO_PORT: 27017
-      REDIS_HOST: course-redisdb
+      REDIS_HOST: redis
       REDIS_PORT: 6379
-      DISTRIBUTE_SERVER_HOST: course-distribute-server
+      DISTRIBUTE_SERVER_HOST: distribute
       DISTRIBUTE_SERVER_PORT: 8001
       BACKUP_DIR: /app/tmp/db-backups
     volumes:
       - course-db-backups:/app/tmp/db-backups
     depends_on:
-      course-mongodb:
+      mongodb:
         condition: service_started
-      course-redisdb:
+      redis:
         condition: service_started
-      course-distribute-server:
+      distribute:
         condition: service_started
-      course-init:
+      init:
         condition: service_completed_successfully
 
   # One-shot schema migration and first-admin setup; exits after finishing.
-  course-init:
+  init:
     build:
       context: .
       dockerfile: ./prod-support/backend/Dockerfile
@@ -66,13 +66,13 @@ services:
     env_file:
       - .env
     environment:
-      MONGO_HOST: course-mongodb
+      MONGO_HOST: mongodb
       MONGO_PORT: 27017
     depends_on:
-      course-mongodb:
+      mongodb:
         condition: service_healthy
 
-  course-mongodb:
+  mongodb:
     image: mongo:8.0.4
     restart: unless-stopped
     environment:
@@ -88,13 +88,13 @@ services:
       timeout: 5s
       retries: 10
 
-  course-redisdb:
+  redis:
     image: redis:7-alpine
     restart: unless-stopped
     expose:
       - "6379"
 
-  course-distribute-server:
+  distribute:
     build:
       context: .
       dockerfile: ./prod-support/distribute-server/Dockerfile
@@ -102,7 +102,7 @@ services:
     expose:
       - "8001"
     environment:
-      MONGO_HOST: course-mongodb
+      MONGO_HOST: mongodb
       MONGO_PORT: 27017
       MONGO_DBNAME: ${MONGO_DBNAME}
       MONGO_USERNAME: ${MONGO_USERNAME}

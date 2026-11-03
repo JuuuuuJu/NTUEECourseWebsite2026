@@ -13,8 +13,8 @@ EXPOSE 8000
 
 
 # Environment overwrite
-# ENV MONGO_HOST course-mongodb
-# ENV REDIS_HOST course-redisdb
+# ENV MONGO_HOST mongodb
+# ENV REDIS_HOST redis
 
 # startup command
 CMD ["npm", "run", "server"]
