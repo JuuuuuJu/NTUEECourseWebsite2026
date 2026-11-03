@@ -32,6 +32,19 @@ const theme = createMuiTheme({
     },
   },
   overrides: {
+    // Cards keep the translucent paper; floating layers need a solid
+    // background so text and buttons stay readable over the page.
+    MuiDialog: {
+      paper: {
+        backgroundColor: "#192231",
+        backgroundImage: "none",
+      },
+    },
+    MuiPopover: {
+      paper: {
+        backgroundColor: "#192231",
+      },
+    },
     MuiCssBaseline: {
       "@global": {
         "html, body, #root": {

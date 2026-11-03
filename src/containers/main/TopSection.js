@@ -20,6 +20,7 @@ export default function Top() {
   const [start, setStart] = useState(null);
   const [end, setEnd] = useState(null);
   const [showLeft, setShowLeft] = useState(true);
+  const [ended, setEnded] = useState(false);
   const history = useHistory();
 
   const { authority } = useSelector(selectSession);
@@ -50,6 +51,7 @@ export default function Top() {
         setEnd(res.data.end);
         const now = new Date().getTime();
         const gap = res.data.end * 1000 - now;
+        setEnded(gap <= 0);
         if (now - res.data.start * 1000 < 0) {
           setShowLeft(false);
         } else {
@@ -81,9 +83,10 @@ export default function Top() {
       }
 
       setShowLeft(true);
-      if (gap < 0 && authority == 0) {
-        alert("Time's up! You cannot preselect courses any more!");
+      setEnded(gap <= 0);
+      if (gap <= 0) {
         clearInterval(timer);
+        if (authority == 0) alert("Time's up! You cannot preselect courses any more!");
       } else {
         const { textDay, textHour, textMinute, textSecond } = getLeftTime(gap);
         setLeftDays(textDay);
@@ -198,8 +201,9 @@ export default function Top() {
               </Typography>
               {showLeft ? (
                 <Typography gutterBottom variant="h6" className={classes.time}>
-                  剩餘: {leftDays}天{leftHours}小時{leftMinutes}分{leftSeconds}
-                  秒
+                  {ended
+                    ? "選課已結束"
+                    : `剩餘: ${leftDays}天${leftHours}小時${leftMinutes}分${leftSeconds}秒`}
                 </Typography>
               ) : (
                 <></>

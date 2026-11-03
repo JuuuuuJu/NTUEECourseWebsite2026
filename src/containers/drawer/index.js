@@ -37,7 +37,7 @@ import { Redirect } from "react-router";
 import { selectSession, logout } from "../../slices/sessionSlice";
 // route
 
-const drawerWidth = 200;
+const drawerWidth = 260;
 const useStyles = makeStyles((theme) => ({
   drawer: {
     width: drawerWidth,
