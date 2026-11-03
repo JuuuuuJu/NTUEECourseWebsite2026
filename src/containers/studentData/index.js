@@ -83,6 +83,10 @@ export default function StudentData() {
   const [invalidDelete, setInvalidDelete] = React.useState(false);
   const [regenerateOpen, setRegenerateOpen] = React.useState(false);
   const [downloadOpen, setDownloadOpen] = React.useState(false);
+  const [fullListOpen, setFullListOpen] = React.useState(false);
+  const [fullListFilename, setFullListFilename] = React.useState("");
+  const [fullListDiff, setFullListDiff] = React.useState(null);
+  const [fullListSaving, setFullListSaving] = React.useState(false);
   const [invalidRegenerate, setInvalidRegenerate] = React.useState(false);
   const [alert, setAlert] = React.useState({});
   const [errors, setErrors] = React.useState({
@@ -285,6 +289,16 @@ export default function StudentData() {
     setDownloadOpen(false);
   };
 
+  const handleOpenFullList = () => {
+    setFullListFilename("");
+    setFullListDiff(null);
+    setFullListOpen(true);
+  };
+
+  const handleCloseFullList = () => {
+    if (!fullListSaving) setFullListOpen(false);
+  };
+
   const onIdChange = (e) => {
     setNewStudent({
       ...newStudent,
@@ -448,6 +462,174 @@ export default function StudentData() {
     element.click();
 
     document.body.removeChild(element);
+  };
+
+  const handleUploadFullList = (efile) => {
+    if (!efile) return;
+    Papa.parse(efile, {
+      header: true,
+      skipEmptyLines: "greedy",
+      transformHeader: (header) => header.trim(),
+      complete(results) {
+        const requiredHeaders = ["userID", "name", "grade"];
+        const headers = results.meta.fields || [];
+        if (
+          results.errors.length ||
+          requiredHeaders.some((header) => !headers.includes(header))
+        ) {
+          showAlert(
+            "error",
+            "Invalid CSV. Required headers: userID, name, grade."
+          );
+          return;
+        }
+
+        const seen = new Set();
+        const latest = [];
+        let invalid = false;
+        let duplicate = false;
+        results.data.forEach((row) => {
+          const id = String(row.userID || "").trim().toUpperCase();
+          const name = String(row.name || "").trim();
+          const gradeText = String(row.grade || "").trim();
+          if (!id || !name || !/^\d+$/.test(gradeText) || Number(gradeText) < 1) {
+            invalid = true;
+            return;
+          }
+          if (seen.has(id)) {
+            duplicate = true;
+            return;
+          }
+          seen.add(id);
+          latest.push({ id, name, grade: Math.min(Number(gradeText), 4) });
+        });
+
+        if (invalid || duplicate || !latest.length) {
+          showAlert(
+            "error",
+            invalid
+              ? "Invalid student data format."
+              : duplicate
+              ? "Student userID is duplicated in the latest list."
+              : "The latest list is empty."
+          );
+          return;
+        }
+
+        const currentById = new Map(
+          data.map((student) => [student.id.toUpperCase(), student])
+        );
+        const latestById = new Map(
+          latest.map((student) => [student.id, student])
+        );
+        const added = latest.filter((student) => !currentById.has(student.id));
+        const changed = latest
+          .filter((student) => {
+            const current = currentById.get(student.id);
+            return (
+              current &&
+              (current.name !== student.name ||
+                Number(current.grade) !== student.grade)
+            );
+          })
+          .map((student) => ({
+            ...student,
+            current: currentById.get(student.id),
+          }));
+        // Authority 2 accounts are system administrators, not student-roster
+        // members, and the existing Student Data flow never permits deleting them.
+        const missing = data.filter(
+          (student) =>
+            student.authority !== 2 &&
+            !latestById.has(student.id.toUpperCase())
+        );
+
+        setFullListFilename(efile.name);
+        setFullListDiff({ added, changed, missing });
+      },
+    });
+  };
+
+  const handleApplyFullList = async (deleteMissing) => {
+    if (!fullListDiff || fullListSaving) return;
+    const { added, changed, missing } = fullListDiff;
+    if (missing.length) {
+      download(
+        "students-missing-from-latest-list.csv",
+        Papa.unparse(
+          missing.map((student) => ({
+            userID: student.id,
+            name: student.name,
+            grade: student.grade,
+          }))
+        )
+      );
+    }
+
+    setFullListSaving(true);
+    const additionsWithPasswords = added.map((student) => ({
+      ...student,
+      authority: 0,
+      password: genPassword(),
+    }));
+    try {
+      if (changed.length) {
+        const updateResponse = await StudentDataAPI.putStudentData(
+          changed.map((student) => ({
+            userID: student.id,
+            name: student.name,
+            grade: student.grade,
+            authority: student.current.authority,
+          }))
+        );
+        if (!updateResponse) throw new Error("Student update failed");
+      }
+      if (additionsWithPasswords.length) {
+        const addResponse = await StudentDataAPI.postStudentData(
+          additionsWithPasswords.map((student) => ({
+            userID: student.id,
+            name: student.name,
+            grade: student.grade,
+            authority: student.authority,
+            password: student.password,
+          }))
+        );
+        if (!addResponse) throw new Error("Student creation failed");
+        download(
+          "students-added-from-latest-list.csv",
+          Papa.unparse(
+            additionsWithPasswords.map((student) => ({
+              userID: student.id,
+              name: student.name,
+              grade: student.grade,
+            }))
+          )
+        );
+      }
+      if (deleteMissing && missing.length) {
+        const deleteResponse = await StudentDataAPI.deleteStudentData(
+          missing.map((student) => student.id)
+        );
+        if (!deleteResponse) throw new Error("Student deletion failed");
+      }
+      await handleStudentDataReload();
+      setFullListOpen(false);
+      setFullListDiff(null);
+      showAlert(
+        "success",
+        `Latest full list applied: ${added.length} added, ${changed.length} updated, ${
+          deleteMissing ? missing.length : 0
+        } deleted.`
+      );
+    } catch (err) {
+      await handleStudentDataReload();
+      showAlert(
+        "error",
+        "Full-list sync stopped after an error. Student data was reloaded; please compare and retry."
+      );
+    } finally {
+      setFullListSaving(false);
+    }
   };
 
   const handleDownloadPassword = () => {
@@ -980,6 +1162,97 @@ export default function StudentData() {
           </Button>
         </DialogActions>
       </Dialog>
+      <Dialog
+        aria-labelledby="full-list-dialog-title"
+        disableBackdropClick
+        fullWidth
+        maxWidth="md"
+        open={fullListOpen}
+        onClose={handleCloseFullList}
+      >
+        <DialogTitle id="full-list-dialog-title">
+          Upload Latest Full List
+        </DialogTitle>
+        <DialogContent>
+          {!fullListDiff ? (
+            <>
+              <Typography gutterBottom>
+                Compare a complete CSV (userID, name, grade) with current student
+                data. Grades above 4 are imported as grade 4 only in this flow.
+              </Typography>
+              <label htmlFor="latest-full-list-file">
+                <input
+                  accept=".csv,text/csv"
+                  className={classes.input}
+                  id="latest-full-list-file"
+                  type="file"
+                  onChange={(e) => handleUploadFullList(e.target.files[0])}
+                />
+                <Button variant="outlined" color="primary" component="span">
+                  Select CSV File
+                </Button>
+              </label>
+            </>
+          ) : (
+            <>
+              <Typography gutterBottom>{fullListFilename}</Typography>
+              <Typography>
+                Add: {fullListDiff.added.length}　Update name/grade:{" "}
+                {fullListDiff.changed.length}　Missing from latest list:{" "}
+                {fullListDiff.missing.length}
+              </Typography>
+              {fullListDiff.changed.map((student) => (
+                <Typography key={`changed-${student.id}`}>
+                  {student.id}: {student.current.name} / {student.current.grade} → {student.name} / {student.grade}
+                </Typography>
+              ))}
+              {fullListDiff.missing.length > 0 && (
+                <>
+                  <Typography variant="h6">Missing from latest list</Typography>
+                  {fullListDiff.missing.map((student) => (
+                    <Typography key={`missing-${student.id}`}>
+                      {student.id}, {student.name}, grade {student.grade}
+                    </Typography>
+                  ))}
+                  <Alert severity="warning">
+                    Both Keep and Delete download these students as a CSV before
+                    applying changes.
+                  </Alert>
+                </>
+              )}
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseFullList} disabled={fullListSaving}>
+            Cancel
+          </Button>
+          {fullListDiff && (
+            <>
+              <Button
+                onClick={() => handleApplyFullList(false)}
+                disabled={fullListSaving}
+                variant="outlined"
+                color="primary"
+              >
+                {fullListDiff.missing.length > 0
+                  ? "Keep Missing Students"
+                  : "Apply Changes"}
+              </Button>
+              {fullListDiff.missing.length > 0 && (
+                <Button
+                  onClick={() => handleApplyFullList(true)}
+                  disabled={fullListSaving}
+                  variant="contained"
+                  color="secondary"
+                >
+                  Delete Missing Students
+                </Button>
+              )}
+            </>
+          )}
+        </DialogActions>
+      </Dialog>
       <Grid
         container
         spacing={1}
@@ -1013,6 +1286,16 @@ export default function StudentData() {
                 disabled={authority !== 2}
               >
                 Add Students (csv)
+              </Button>
+            </Grid>
+            <Grid item>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleOpenFullList}
+                disabled={authority !== 2}
+              >
+                Upload Latest Full List
               </Button>
             </Grid>
             <Grid item>

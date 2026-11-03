@@ -21,6 +21,7 @@ const digitalLabRouter = require("./digitalLab/routes");
 const backupService = require("./backup/service");
 const createBackupRouter = require("./backup/routes");
 const runDistribution = require("./distribution/run");
+const { sortResultsForCsv } = require("./resultCsv");
 
 // ========================================
 
@@ -915,9 +916,12 @@ router.get(
   "/result.csv",
   permissionRequired(constants.AUTHORITY_ADMIN),
   asyncHandler(async (req, res, next) => {
-    const results = await model.Result.find({}).exec();
+    const [results, courses] = await Promise.all([
+      model.Result.find({}).exec(),
+      model.Course.find({}, "name options").exec(),
+    ]);
     const rows = [["studentID", "courseName", "optionName"]];
-    results.forEach((result) => {
+    sortResultsForCsv(results, courses).forEach((result) => {
       rows.push([result.studentID, result.courseName, result.optionName]);
     });
     const output = await csvStringifyPromise(rows);
